@@ -55,7 +55,11 @@ tls (not decrypted): www.google.com, api.example.com×3
   decrypts matching hosts; that needs the mitmproxy CA installed as a user CA and an app that trusts user CAs
   (a debug build with `network_security_config`).
 - Only apps honoring the system proxy show up (OkHttp/HttpURLConnection do; Zalo, Flutter and custom sockets mostly do not).
-- `show` redacts auth/cookie headers and credential-like keys and bearer tokens in bodies; bodies are cut at 2,000 chars.
+- `start {app:"com.zing.zalo"}` captures one app with [PCAPdroid](https://f-droid.org/packages/com.emanuelef.remote_capture/)
+  instead (per-app VPN, no root). It sees apps that bypass the proxy but cannot decrypt, so `list` gives one line per
+  destination from TLS SNI, HTTP Host and DNS (`tls api.example.com:443 conns=2 bytes=6310`). Set `PCAPDROID_API_KEY`
+  (PCAPdroid > Settings > Control permissions > Generate API key) in the server env to skip the consent prompts.
+- `show` hides browser/transport headers unless `all=true`, and redacts auth/cookie headers, credential-like keys and bearer tokens in bodies; bodies are cut at 2,000 chars.
 - The proxy is cleared on `stop` and when the server exits. If the server is killed hard, restore the device's
   internet with `adb shell settings put global http_proxy :0`.
 

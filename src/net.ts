@@ -13,6 +13,14 @@ import { ActionableError } from "./robot";
 // that honor the system proxy show up; tls is passed through (host only) unless
 // the host matches `decrypt` and the app trusts the mitmproxy ca.
 const ADDON = path.join(__dirname, "..", "native", "net_addon.py");
+const PCAP_HOSTS = path.join(__dirname, "..", "native", "pcap_hosts.py");
+
+// per-app capture for apps that ignore the system proxy (zalo, flutter, custom sockets):
+// pcapdroid's vpn sees every connection of the app but cannot decrypt, so it lists hosts.
+// without PCAPDROID_API_KEY the device asks for consent on start and stop.
+const PCAPDROID = "com.emanuelef.remote_capture";
+const PCAPDROID_CTRL = `${PCAPDROID}/.activities.CaptureCtrl`;
+const PCAP_DIR = "/sdcard/Download/PCAPdroid";
 const LIST_LIMIT = 50;
 
 // browser/transport noise that rarely matters when debugging an api; show {all} keeps them
@@ -91,12 +99,14 @@ export class NetCapture {
 	private port = 0;
 	private dir = "";
 	private cursor = 0;
+	// set while pcapdroid captures a single app
+	private pcapName = "";
 
 	public constructor(private robot: AndroidRobot) {
 	}
 
 	public get running(): boolean {
-		return this.proc !== null;
+		return this.proc !== null || this.pcapName !== "";
 	}
 
 	private get logFile() {
@@ -107,9 +117,50 @@ export class NetCapture {
 		return path.join(this.dir, "detail.jsonl");
 	}
 
-	public async start(decrypt?: string): Promise<string> {
-		if (this.proc) {
-			return `already capturing on port ${this.port}`;
+	private pcapdroid(action: string, ...extras: string[]) {
+		const key = process.env.PCAPDROID_API_KEY;
+		const auth = key ? ["-e", "api_key", key] : [];
+		this.robot.adb("shell", "am", "start", "-e", "action", action, ...auth, ...extras, "-n", PCAPDROID_CTRL);
+	}
+
+	private async startApp(app: string): Promise<string> {
+		const installed = this.robot.adb("shell", "pm", "list", "packages", PCAPDROID).toString();
+		if (!installed.includes(`package:${PCAPDROID}`)) {
+			throw new ActionableError("PCAPdroid is not installed (F-Droid: com.emanuelef.remote_capture)");
+		}
+
+		this.removeFiles();
+		this.dir = fs.mkdtempSync(path.join(os.tmpdir(), "mobile-mcp-net-"));
+		this.pcapName = `mobile-mcp-${Date.now()}.pcap`;
+		this.pcapdroid("start", "-e", "app_filter", app, "-e", "pcap_dump_mode", "pcap_file", "-e", "pcap_name", this.pcapName);
+		await sleep(1500);
+		const consent = process.env.PCAPDROID_API_KEY ? "" : " (no PCAPDROID_API_KEY: approve the prompts on the device)";
+		return `capturing ${app} with PCAPdroid, hosts only${consent}`;
+	}
+
+	// pulls the pcap (also while it is still being written) and summarizes it per host
+	private appHosts(filter?: string): string {
+		const local = path.join(this.dir, "capture.pcap");
+		try {
+			this.robot.adb("pull", `${PCAP_DIR}/${this.pcapName || "missing"}`, local);
+		} catch (error: any) {
+			return "no traffic captured yet";
+		}
+
+		const wanted = filter?.toLowerCase();
+		const lines = execFileSync("python3", ["-I", PCAP_HOSTS, local]).toString()
+			.split("\n")
+			.filter(line => line.trim() !== "" && (!wanted || line.toLowerCase().includes(wanted)));
+		return lines.length ? lines.slice(0, LIST_LIMIT).join("\n") : "no traffic captured yet";
+	}
+
+	public async start(decrypt?: string, app?: string): Promise<string> {
+		if (this.proc || this.pcapName) {
+			return "already capturing; stop first";
+		}
+
+		if (app) {
+			return this.startApp(app);
 		}
 
 		if (decrypt) {
@@ -149,6 +200,10 @@ export class NetCapture {
 
 	// new requests since the previous list; tls passthrough grouped per host
 	public list(filter?: string, all?: boolean): string {
+		if (this.pcapName) {
+			return this.appHosts(filter);
+		}
+
 		const records = readJsonl<Summary>(this.logFile);
 		const fresh = all ? records : records.filter(r => r.id > this.cursor);
 		if (records.length > 0) {
@@ -202,6 +257,14 @@ export class NetCapture {
 	}
 
 	public stop(): string {
+		if (this.pcapName) {
+			this.pcapdroid("stop");
+			const hosts = this.appHosts();
+			this.robot.adb("shell", "rm", "-f", `${PCAP_DIR}/${this.pcapName}`);
+			this.pcapName = "";
+			return `stopped PCAPdroid, capture file removed from the device\n${hosts}`;
+		}
+
 		const total = readJsonl<Summary>(this.logFile).length;
 		this.stopProcess();
 		return `stopped, proxy cleared. ${total} records kept until the next start`;

@@ -399,9 +399,10 @@ export const createMcpServer = (): McpServer => {
 			all: z.boolean().optional().describe("list: include requests already listed; show: keep browser/transport headers"),
 			id: z.number().int().optional().describe("show: request id from list"),
 			decrypt: z.string().optional().describe("start: regex of hosts to decrypt, e.g. api\\.myapp\\.com"),
+			app: z.string().optional().describe("start: package to capture with PCAPdroid instead (sees apps that bypass the proxy, hosts only)"),
 		},
 		{ destructiveHint: true },
-		async ({ device, action, filter, all, id, decrypt }) => {
+		async ({ device, action, filter, all, id, decrypt, app }) => {
 			let capture = captures.get(device);
 			if (!capture) {
 				capture = new NetCapture(getRobot(device));
@@ -410,7 +411,11 @@ export const createMcpServer = (): McpServer => {
 
 			switch (action) {
 				case "start":
-					return capture.start(decrypt);
+					if (app) {
+						validatePackageName(app);
+					}
+
+					return capture.start(decrypt, app);
 				case "list":
 					return capture.list(filter, all);
 				case "show":
