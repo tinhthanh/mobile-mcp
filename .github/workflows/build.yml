@@ -1,17 +1,18 @@
 name: Build
 permissions:
-  id-token: write
   contents: read
 
 on:
   push:
     branches:
       - main
+      - lite
     paths-ignore:
       - "**.md"
   pull_request:
     branches:
       - main
+      - lite
     paths-ignore:
       - "**.md"
 

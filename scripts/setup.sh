@@ -3,7 +3,7 @@
 #
 #   scripts/setup.sh host                 adb, mitmproxy, build
 #   scripts/setup.sh device [serial]      UiAutomator2 server, PCAPdroid (+ api key), mitmproxy CA file
-#   scripts/setup.sh register             add/refresh the MCP server in Claude Code with the saved keys
+#   scripts/setup.sh register             add the MCP server to Claude Code (once per Mac)
 #   scripts/setup.sh verify [serial]      check everything on a device
 #   scripts/setup.sh clean [serial]       remove what `device` installed (the user CA is removed by hand)
 #
@@ -135,7 +135,7 @@ cmd_device() {
 	fi
 
 	step "Tiếp theo"
-	echo "  scripts/setup.sh register   # cập nhật MCP trong Claude Code với key của máy này"
+	echo "  scripts/setup.sh register   # chỉ cần một lần cho mỗi máy Mac"
 	echo "  scripts/setup.sh verify     # kiểm tra lại"
 }
 
@@ -212,18 +212,10 @@ approve_vpn_once() {
 
 cmd_register() {
 	command -v claude >/dev/null || fail "Không thấy lệnh claude"
-	local envs=()
-	if [ -f "$KEYS" ]; then
-		while IFS= read -r line; do
-			[ -n "$line" ] && envs+=(-e "$line")
-		done < "$KEYS"
-	fi
-
 	claude mcp remove mobile-lite -s user >/dev/null 2>&1 || true
-	# the server name goes before -e, which takes every following KEY=value
-	claude mcp add -s user mobile-lite ${envs[@]+"${envs[@]}"} -- node "$REPO/lib/index.js" >/dev/null
-	ok "đã đăng ký mobile-lite với $(( ${#envs[@]} / 2 )) api key (ẩn); mở phiên Claude Code mới để dùng"
-	warn "key được lưu dạng chữ thường trong ~/.claude.json"
+	# api keys stay in $KEYS, which the server reads itself, so ~/.claude.json holds no secret
+	claude mcp add -s user mobile-lite -- node "$REPO/lib/index.js" >/dev/null
+	ok "đã đăng ký mobile-lite; key PCAPdroid đọc từ $KEYS. Mở phiên Claude Code mới để dùng"
 }
 
 cmd_verify() {

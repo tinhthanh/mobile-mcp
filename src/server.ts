@@ -99,6 +99,7 @@ const getRobot = (deviceId: string): AndroidRobot => {
 
 		robot = new AndroidRobot(deviceId);
 		robots.set(deviceId, robot);
+		NetCapture.clearStaleProxy(robot).catch(err => trace(`stale proxy check failed: ${err.message}`));
 	}
 
 	return robot;

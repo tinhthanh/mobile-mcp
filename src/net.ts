@@ -21,6 +21,12 @@ const PCAP_HOSTS = path.join(__dirname, "..", "native", "pcap_hosts.py");
 const PCAPDROID = "com.emanuelef.remote_capture";
 const PCAPDROID_CTRL = `${PCAPDROID}/.activities.CaptureCtrl`;
 const PCAP_DIR = "/sdcard/Download/PCAPdroid";
+
+// written by scripts/setup.sh, so the keys never need to sit in the mcp client's config
+const keysFile = (): string => process.env.MOBILEMCP_KEYS_FILE || path.join(os.homedir(), ".config", "mobile-mcp-lite", "keys.env");
+
+// marks a proxy we set, so a later run can tell our dead proxy from one the user configured
+const OWNER_SETTING = "mobile_mcp_proxy_port";
 const LIST_LIMIT = 50;
 
 // browser/transport noise that rarely matters when debugging an api; show {all} keeps them
@@ -85,6 +91,22 @@ const size = (bytes?: number): string => {
 	return bytes < 1024 ? `${bytes}B` : `${(bytes / 1024).toFixed(1)}KB`;
 };
 
+const readKeys = (file: string): Record<string, string> => {
+	if (!fs.existsSync(file)) {
+		return {};
+	}
+
+	const keys: Record<string, string> = {};
+	for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+		const eq = line.indexOf("=");
+		if (eq > 0 && !line.startsWith("#")) {
+			keys[line.substring(0, eq).trim()] = line.substring(eq + 1).trim();
+		}
+	}
+
+	return keys;
+};
+
 const readJsonl = <T>(file: string): T[] => {
 	if (!fs.existsSync(file)) {
 		return [];
@@ -102,7 +124,8 @@ export class NetCapture {
 	// set while pcapdroid captures a single app
 	private pcapName = "";
 
-	public constructor(private robot: AndroidRobot) {
+	public constructor(private robot: AndroidRobot, port = 0) {
+		this.port = port;
 	}
 
 	public get running(): boolean {
@@ -117,10 +140,31 @@ export class NetCapture {
 		return path.join(this.dir, "detail.jsonl");
 	}
 
-	// each device generates its own key: PCAPDROID_API_KEY_<serial> wins over PCAPDROID_API_KEY
+	// each device generates its own key: PCAPDROID_API_KEY_<serial> wins over PCAPDROID_API_KEY,
+	// looked up in the environment first and then in the keys file
 	private apiKey(): string | undefined {
-		const serial = this.robot.deviceId.replace(/[^A-Za-z0-9]/g, "_");
-		return process.env[`PCAPDROID_API_KEY_${serial}`] || process.env.PCAPDROID_API_KEY;
+		const names = [`PCAPDROID_API_KEY_${this.robot.deviceId.replace(/[^A-Za-z0-9]/g, "_")}`, "PCAPDROID_API_KEY"];
+		const fromEnv = names.map(name => process.env[name]).find(Boolean);
+		if (fromEnv) {
+			return fromEnv;
+		}
+
+		const saved = readKeys(keysFile());
+		return names.map(name => saved[name]).find(Boolean);
+	}
+
+	// a server killed hard leaves the device on a proxy nobody listens to, i.e. without internet
+	public static async clearStaleProxy(robot: AndroidRobot): Promise<boolean> {
+		const proxy = robot.adb("shell", "settings", "get", "global", "http_proxy").toString().trim();
+		const owned = robot.adb("shell", "settings", "get", "global", OWNER_SETTING).toString().trim();
+		const port = Number(owned);
+		if (!port || proxy !== `127.0.0.1:${port}` || await isListening(port)) {
+			return false;
+		}
+
+		trace(`clearing stale proxy ${proxy} left by an earlier run`);
+		new NetCapture(robot, port).clearProxy();
+		return true;
 	}
 
 	private pcapdroid(action: string, ...extras: string[]) {
@@ -200,6 +244,7 @@ export class NetCapture {
 		}
 
 		this.robot.adb("reverse", `tcp:${this.port}`, `tcp:${this.port}`);
+		this.robot.adb("shell", "settings", "put", "global", OWNER_SETTING, `${this.port}`);
 		this.robot.adb("shell", "settings", "put", "global", "http_proxy", `127.0.0.1:${this.port}`);
 		return `capturing via 127.0.0.1:${this.port}` + (decrypt ? `, decrypting hosts matching /${decrypt}/` : ", https hosts only (no decrypt)");
 	}
@@ -287,6 +332,7 @@ export class NetCapture {
 		try {
 			this.robot.adb("shell", "settings", "put", "global", "http_proxy", ":0");
 			this.robot.adb("shell", "settings", "delete", "global", "http_proxy");
+			this.robot.adb("shell", "settings", "delete", "global", OWNER_SETTING);
 			if (this.port) {
 				this.robot.adb("reverse", "--remove", `tcp:${this.port}`);
 			}

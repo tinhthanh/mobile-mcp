@@ -15,17 +15,11 @@ import time
 
 from mitmproxy import http, tls
 
-MAX_BODY = 2000
-REDACT = {"authorization", "cookie", "set-cookie", "x-api-key", "proxy-authorization"}
-TEXT_TYPES = ("json", "text", "xml", "javascript", "x-www-form-urlencoded", "graphql")
+# mitmproxy puts the script's directory on sys.path
+from net_redact import REDACT_HEADERS, redact
 
-# secrets inside bodies: json/form values under credential-like keys, and bearer tokens
-SECRET_KEYS = r"[\w-]*(?:token|password|passwd|secret|authorization|api[_-]?key|cookie|session)[\w-]*"
-SECRET_JSON = re.compile(r'("' + SECRET_KEYS + r'"\s*:\s*)"(?:[^"\\]|\\.)*"', re.IGNORECASE)
-# the same json escaped inside a string value, e.g. an echoed request body
-SECRET_ESCAPED = re.compile(r'(\\"' + SECRET_KEYS + r'\\"\s*:\s*\\")[^"\\]*', re.IGNORECASE)
-SECRET_FORM = re.compile(r"((?:^|&)" + SECRET_KEYS + r"=)[^&]*", re.IGNORECASE)
-BEARER = re.compile(r"(Bearer\s+)[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
+MAX_BODY = 2000
+TEXT_TYPES = ("json", "text", "xml", "javascript", "x-www-form-urlencoded", "graphql")
 
 _lock = threading.Lock()
 _next_id = 0
@@ -46,7 +40,7 @@ def _write(summary, detail=None):
 
 
 def _headers(headers):
-    return {k: ("[redacted]" if k.lower() in REDACT else v) for k, v in headers.items()}
+    return {k: ("[redacted]" if k.lower() in REDACT_HEADERS else v) for k, v in headers.items()}
 
 
 def _body(message):
@@ -56,11 +50,7 @@ def _body(message):
     size = len(message.raw_content)
     if not any(t in ctype for t in TEXT_TYPES):
         return f"<{ctype or 'binary'} {size} bytes>"
-    text = message.get_text(strict=False) or ""
-    text = SECRET_JSON.sub(r'\1"[redacted]"', text)
-    text = SECRET_ESCAPED.sub(r"\1[redacted]", text)
-    text = SECRET_FORM.sub(r"\1[redacted]", text)
-    text = BEARER.sub(r"\1[redacted]", text)
+    text = redact(message.get_text(strict=False) or "")
     return text if len(text) <= MAX_BODY else text[:MAX_BODY] + f"…<{size} bytes total>"
 
 
