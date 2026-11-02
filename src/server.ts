@@ -6,7 +6,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 import { trace } from "./logger";
-import { AndroidRobot, AndroidDeviceManager } from "./android";
+import { AndroidRobot, AndroidDeviceManager, getAdbPath } from "./android";
 import { ActionableError, Button } from "./robot";
 import { compactScreen, findLine, SCREEN_LEGEND } from "./screen";
 import { ocrLines } from "./ocr";
@@ -21,6 +21,11 @@ const SETTLE_MS = 500;
 const STABLE_MIN_MS = 300;
 const STABLE_MAX_MS = 4000;
 const SCREENSHOT_MAX_SIZE = 1024;
+const POLL_MS = 300;
+const DEFAULT_WAIT_MS = 10000;
+const MAX_WAIT_MS = 30000;
+const MAX_STEPS = 30;
+const DEVICE_CACHE_MS = 10000;
 
 const BUTTONS = ["BACK", "HOME", "ENTER", "VOLUME_UP", "VOLUME_DOWN", "DPAD_CENTER", "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT"] as const;
 
@@ -41,11 +46,10 @@ export const getSdkVersion = (): string => {
 	}
 };
 
-const SERVER_INSTRUCTIONS = `Drive an Android device over adb.
-Call devices once, then pass the device id to every call.
-Read the screen with screen (cheap text). ${SCREEN_LEGEND}
-tap, type, swipe, key and app already return the new screen, or "unchanged" - do not call screen again after them.
-Use screenshot only to judge visual appearance.`;
+const SERVER_INSTRUCTIONS = `Drive an Android device over adb. device may be omitted when only one is connected.
+Read the screen with screen. ${SCREEN_LEGEND}
+tap, type, swipe, key, app and steps return the new screen (or "unchanged"); observe=false skips it. Do not call screen right after them.
+Batch known sequences with steps; use wait instead of polling screen.`;
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -103,6 +107,31 @@ const getRobot = (deviceId: string): AndroidRobot => {
 	}
 
 	return robot;
+};
+
+let cachedDevices: { at: number, ids: string[] } | null = null;
+
+// the device param is optional: with a single connected device there is nothing to choose
+const resolveDevice = (deviceId?: string): string => {
+	if (deviceId) {
+		return deviceId;
+	}
+
+	if (!cachedDevices || Date.now() - cachedDevices.at > DEVICE_CACHE_MS) {
+		const ids = execFileSync(getAdbPath(), ["devices"]).toString()
+			.split("\n")
+			.map(line => line.trim().split("\t"))
+			.filter(([, state]) => state === "device")
+			.map(([id]) => id);
+		cachedDevices = { at: Date.now(), ids };
+	}
+
+	if (cachedDevices.ids.length !== 1) {
+		const found = cachedDevices.ids.length ? cachedDevices.ids.join(", ") : "none";
+		throw new ActionableError(`Pass device: ${cachedDevices.ids.length} devices connected (${found})`);
+	}
+
+	return cachedDevices.ids[0];
 };
 
 const getUia2 = (deviceId: string): Uia2Client | null => {
@@ -218,12 +247,93 @@ export const createMcpServer = (): McpServer => {
 		return prefix + report(deviceId, await settledScreen(deviceId));
 	};
 
-	const device = z.string().describe("Device id from devices");
-	const observe = z.boolean().optional().describe("Return the new screen afterwards (default true)");
+	const device = z.string().optional();
+	const observe = z.boolean().optional();
+
+	const tap = async (deviceId: string, x: number | undefined, y: number | undefined, text?: string, mode?: string, waitMs = 0): Promise<string> => {
+		const robot = getRobot(deviceId);
+		let prefix = "";
+		if (x === undefined || y === undefined) {
+			if (!text) {
+				throw new ActionableError("Give x,y or text");
+			}
+
+			// the target may still be animating in, so look for it a little while
+			const deadline = Date.now() + waitMs;
+			let screen = await captureScreen(deviceId, false);
+			let found = findLine(screen, text);
+			while (!found && Date.now() < deadline) {
+				await sleep(POLL_MS);
+				screen = await captureScreen(deviceId, false);
+				found = findLine(screen, text);
+			}
+
+			if (!found) {
+				lastScreen.set(deviceId, screen);
+				throw new ActionableError(`No element matches "${text}". Current screen:\n${screen}\n`);
+			}
+
+			({ x, y } = found);
+			prefix = `tapped ${found.line}` + (found.matches > 1 ? ` (first of ${found.matches} matches)` : "") + "\n";
+		}
+
+		if (mode === "double") {
+			await robot.doubleTap(x, y);
+		} else if (mode === "long") {
+			await robot.longPress(x, y, 800);
+		} else {
+			await robot.tap(x, y);
+		}
+
+		return prefix;
+	};
+
+	const type = async (deviceId: string, text: string, submit?: boolean) => {
+		// uia2 setText handles unicode and replaces the field; adb `input text` is ascii only and appends
+		const typed = await getUia2(deviceId)?.setFocusedText(text);
+		if (!typed) {
+			await getRobot(deviceId).sendKeys(text);
+		}
+
+		if (submit) {
+			await getRobot(deviceId).pressButton("ENTER");
+		}
+	};
+
+	const app = async (deviceId: string, action: string, pkg?: string) => {
+		if (!pkg) {
+			throw new ActionableError(`package is required for ${action}`);
+		}
+
+		validatePackageName(pkg);
+		if (action === "launch") {
+			await getRobot(deviceId).launchApp(pkg);
+		} else {
+			await getRobot(deviceId).terminateApp(pkg);
+		}
+	};
+
+	// polls until text shows up (or is gone), returning the screen it matched on
+	const waitFor = async (deviceId: string, text: string, gone: boolean, timeoutMs: number): Promise<string> => {
+		const deadline = Date.now() + Math.min(timeoutMs, MAX_WAIT_MS);
+		for (;;) {
+			const screen = await captureScreen(deviceId, false);
+			if (!!findLine(screen, text) !== gone) {
+				return screen;
+			}
+
+			if (Date.now() >= deadline) {
+				lastScreen.set(deviceId, screen);
+				throw new ActionableError(`Timed out waiting for "${text}" to ${gone ? "disappear" : "appear"}. Current screen:\n${screen}\n`);
+			}
+
+			await sleep(POLL_MS);
+		}
+	};
 
 	tool(
 		"devices",
-		"List connected Android devices (id model android-version).",
+		"List connected devices: id model android-version.",
 		{},
 		{ readOnlyHint: true },
 		async () => {
@@ -238,207 +348,216 @@ export const createMcpServer = (): McpServer => {
 
 	tool(
 		"screen",
-		"Read the current screen as compact text. Falls back to OCR when the accessibility tree is nearly empty; set ocr=true to force OCR (games, canvas, webviews).",
-		{
-			device,
-			ocr: z.boolean().optional().describe("Read text with OCR instead of the accessibility tree"),
-		},
+		"Read the screen as compact text. ocr=true reads text by OCR (games, canvas); image=true returns a JPEG instead, costing far more tokens.",
+		{ device, ocr: z.boolean().optional(), image: z.boolean().optional() },
 		{ readOnlyHint: true },
-		async ({ device, ocr }) => {
-			lastScreen.delete(device);
-			return report(device, await captureScreen(device, !!ocr));
+		async args => {
+			const id = resolveDevice(args.device);
+			if (args.image) {
+				const { data, mimeType } = shrinkToJpeg(await getRobot(id).getScreenshot());
+				return { type: "image", data: data.toString("base64"), mimeType };
+			}
+
+			lastScreen.delete(id);
+			return report(id, await captureScreen(id, !!args.ocr));
 		}
 	);
 
 	tool(
 		"tap",
-		"Tap at x,y from a screen line, or on the element whose label matches text (one call instead of screen + tap).",
-		{
-			device,
-			x: z.number().int().optional(),
-			y: z.number().int().optional(),
-			text: z.string().optional().describe("Label to find on the current screen, used when x,y are not given"),
-			mode: z.enum(["tap", "double", "long"]).optional(),
-			observe,
-		},
+		"Tap x,y from a screen line, or the element whose label matches text.",
+		{ device, x: z.number().int().optional(), y: z.number().int().optional(), text: z.string().optional(), mode: z.enum(["tap", "double", "long"]).optional(), observe },
 		{ destructiveHint: true },
-		async ({ device, x, y, text, mode, observe }) => {
-			const robot = getRobot(device);
-			let prefix = "";
-			if (x === undefined || y === undefined) {
-				if (!text) {
-					throw new ActionableError("Give x,y or text");
-				}
-
-				const screen = await captureScreen(device, false);
-				const found = findLine(screen, text);
-				if (!found) {
-					lastScreen.set(device, screen);
-					throw new ActionableError(`No element matches "${text}". Current screen:\n${screen}\n`);
-				}
-
-				({ x, y } = found);
-				prefix = `tapped ${found.line}` + (found.matches > 1 ? ` (first of ${found.matches} matches)` : "") + "\n";
-			}
-
-			if (mode === "double") {
-				await robot.doubleTap(x, y);
-			} else if (mode === "long") {
-				await robot.longPress(x, y, 800);
-			} else {
-				await robot.tap(x, y);
-			}
-
-			return afterAction(device, observe !== false, prefix);
+		async args => {
+			const id = resolveDevice(args.device);
+			const prefix = await tap(id, args.x, args.y, args.text, args.mode);
+			return afterAction(id, args.observe !== false, prefix);
 		}
 	);
 
 	tool(
 		"type",
-		"Set the focused input's text (replaces it, unicode ok). Tap the input first. submit=true presses ENTER after.",
-		{
-			device,
-			text: z.string(),
-			submit: z.boolean().optional(),
-			observe,
-		},
+		"Set the focused input's text (replaces it, unicode ok). submit presses ENTER.",
+		{ device, text: z.string(), submit: z.boolean().optional(), observe },
 		{ destructiveHint: true },
-		async ({ device, text, submit, observe }) => {
-			const robot = getRobot(device);
-			// uia2 setText handles unicode and replaces the field; adb `input text` is ascii only and appends
-			const typed = await getUia2(device)?.setFocusedText(text);
-			if (!typed) {
-				await robot.sendKeys(text);
-			}
-
-			if (submit) {
-				await robot.pressButton("ENTER");
-			}
-
-			return afterAction(device, observe !== false);
+		async args => {
+			const id = resolveDevice(args.device);
+			await type(id, args.text, args.submit);
+			return afterAction(id, args.observe !== false);
 		}
 	);
 
 	tool(
 		"swipe",
-		"Swipe to scroll. Without x,y swipes across the screen center. direction=up scrolls content down.",
-		{
-			device,
-			direction: z.enum(["up", "down", "left", "right"]),
-			x: z.number().int().optional(),
-			y: z.number().int().optional(),
-			distance: z.number().int().optional().describe("Pixels, only with x,y"),
-			observe,
-		},
+		"Swipe; up scrolls content down. Optional start x,y and distance in px.",
+		{ device, direction: z.enum(["up", "down", "left", "right"]), x: z.number().int().optional(), y: z.number().int().optional(), distance: z.number().int().optional(), observe },
 		{ destructiveHint: true },
-		async ({ device, direction, x, y, distance, observe }) => {
-			const robot = getRobot(device);
-			if (x !== undefined && y !== undefined) {
-				await robot.swipeFromCoordinate(x, y, direction, distance);
+		async args => {
+			const id = resolveDevice(args.device);
+			const robot = getRobot(id);
+			if (args.x !== undefined && args.y !== undefined) {
+				await robot.swipeFromCoordinate(args.x, args.y, args.direction, args.distance);
 			} else {
-				await robot.swipe(direction);
+				await robot.swipe(args.direction);
 			}
 
-			return afterAction(device, observe !== false);
+			return afterAction(id, args.observe !== false);
 		}
 	);
 
 	tool(
 		"key",
-		"Press a hardware/navigation button.",
-		{
-			device,
-			button: z.enum(BUTTONS),
-			observe,
-		},
+		"Press a button.",
+		{ device, button: z.enum(BUTTONS), observe },
 		{ destructiveHint: true },
-		async ({ device, button, observe }) => {
-			await getRobot(device).pressButton(button as Button);
-			return afterAction(device, observe !== false);
+		async args => {
+			const id = resolveDevice(args.device);
+			await getRobot(id).pressButton(args.button as Button);
+			return afterAction(id, args.observe !== false);
 		}
 	);
 
 	tool(
 		"app",
-		"launch or stop an app by package name, or list launchable packages.",
-		{
-			device,
-			action: z.enum(["launch", "stop", "list"]),
-			package: z.string().optional(),
-			observe,
-		},
+		"Launch or stop a package, or list launchable packages.",
+		{ device, action: z.enum(["launch", "stop", "list"]), package: z.string().optional(), observe },
 		{ destructiveHint: true },
-		async ({ device, action, package: pkg, observe }) => {
-			const robot = getRobot(device);
-			if (action === "list") {
-				return (await robot.listApps()).map(a => a.packageName).join("\n");
+		async args => {
+			const id = resolveDevice(args.device);
+			if (args.action === "list") {
+				return (await getRobot(id).listApps()).map(a => a.packageName).join("\n");
 			}
 
-			if (!pkg) {
-				throw new ActionableError(`package is required for ${action}`);
+			await app(id, args.action, args.package);
+			return afterAction(id, args.observe !== false);
+		}
+	);
+
+	tool(
+		"wait",
+		"Wait until text appears (or is gone) on screen, then return the screen.",
+		{ device, text: z.string(), gone: z.boolean().optional(), timeout: z.number().int().optional().describe("ms, default 10000") },
+		{ readOnlyHint: true },
+		async args => {
+			const id = resolveDevice(args.device);
+			return report(id, await waitFor(id, args.text, !!args.gone, args.timeout ?? DEFAULT_WAIT_MS));
+		}
+	);
+
+	tool(
+		"steps",
+		"Run actions in order, then return the final screen; stops at the first failure. " +
+			"Each item: \"tap <text|x,y>\", \"long <text|x,y>\", \"type <text>\", \"enter\", \"key <BUTTON>\", \"swipe <up|down|left|right>\", " +
+			"\"wait <text>\", \"gone <text>\", \"launch <package>\", \"stop <package>\", \"sleep <ms>\".",
+		{ device, steps: z.array(z.string()).min(1).max(MAX_STEPS) },
+		{ destructiveHint: true },
+		async args => {
+			const id = resolveDevice(args.device);
+			const notes: string[] = [];
+			for (let i = 0; i < args.steps.length; i++) {
+				const stepText = args.steps[i].trim();
+				const space = stepText.indexOf(" ");
+				const verb = (space < 0 ? stepText : stepText.substring(0, space)).toLowerCase();
+				const rest = space < 0 ? "" : stepText.substring(space + 1).trim();
+				const point = rest.match(/^(\d+)\s*,\s*(\d+)$/);
+				try {
+					// let the previous action finish its transition before acting on coordinates
+					if (i > 0 && (point || verb === "type" || verb === "enter")) {
+						await settledScreen(id);
+					}
+
+					switch (verb) {
+						case "tap":
+						case "long": {
+							const note = point
+								? await tap(id, Number(point[1]), Number(point[2]), undefined, verb)
+								: await tap(id, undefined, undefined, rest, verb, DEFAULT_WAIT_MS);
+							if (note) {
+								notes.push(note.trim());
+							}
+
+							break;
+						}
+
+						case "type":
+							await type(id, rest);
+							break;
+						case "enter":
+							await getRobot(id).pressButton("ENTER");
+							break;
+						case "key":
+							await getRobot(id).pressButton(rest.toUpperCase() as Button);
+							break;
+						case "swipe":
+							await getRobot(id).swipe(rest.toLowerCase() as any);
+							break;
+						case "wait":
+						case "gone":
+							await waitFor(id, rest, verb === "gone", DEFAULT_WAIT_MS);
+							break;
+						case "launch":
+						case "stop":
+							await app(id, verb, rest);
+							break;
+						case "sleep":
+							await sleep(Math.min(Number(rest) || 0, MAX_WAIT_MS));
+							break;
+						default:
+							throw new ActionableError(`unknown action "${verb}"`);
+					}
+				} catch (error: any) {
+					const reason = error.message.split("\n")[0];
+					const screen = await captureScreen(id, false);
+					lastScreen.set(id, screen);
+					throw new ActionableError(`step ${i + 1} "${stepText}" failed: ${reason}\n${[...notes, screen].join("\n")}\n`);
+				}
 			}
 
-			validatePackageName(pkg);
-			if (action === "launch") {
-				await robot.launchApp(pkg);
-			} else {
-				await robot.terminateApp(pkg);
-			}
-
-			return afterAction(device, observe !== false);
+			return afterAction(id, true, [`done ${args.steps.length} steps`, ...notes].join("\n") + "\n");
 		}
 	);
 
 	tool(
 		"net",
-		"Capture the device's HTTP(S) requests through mitmproxy over USB. start, use the app, then list (only new requests since the last list) and show {id} for headers/bodies; always stop when done or the device keeps a dead proxy. " +
-			"Only apps honoring the system proxy appear. HTTPS shows hosts only unless decrypt matches the host and the app trusts the mitmproxy CA (debug builds with network_security_config).",
+		"Capture HTTP(S) requests. start, use the app, list (new since last list), show {id} for headers/bodies, stop when done. " +
+			"Default: mitmproxy over USB for apps using the system proxy; HTTPS hosts only unless decrypt matches and the app trusts the user CA. " +
+			"start {app} uses PCAPdroid instead: every connection of that package, hosts only.",
 		{
 			device,
 			action: z.enum(["start", "list", "show", "stop"]),
-			filter: z.string().optional().describe("list: substring of host or path"),
-			all: z.boolean().optional().describe("list: include requests already listed; show: keep browser/transport headers"),
-			id: z.number().int().optional().describe("show: request id from list"),
-			decrypt: z.string().optional().describe("start: regex of hosts to decrypt, e.g. api\\.myapp\\.com"),
-			app: z.string().optional().describe("start: package to capture with PCAPdroid instead (sees apps that bypass the proxy, hosts only)"),
+			filter: z.string().optional(),
+			all: z.boolean().optional().describe("list: include already listed; show: all headers"),
+			id: z.number().int().optional(),
+			decrypt: z.string().optional().describe("host regex"),
+			app: z.string().optional().describe("package"),
 		},
 		{ destructiveHint: true },
-		async ({ device, action, filter, all, id, decrypt, app }) => {
-			let capture = captures.get(device);
+		async args => {
+			const id = resolveDevice(args.device);
+			let capture = captures.get(id);
 			if (!capture) {
-				capture = new NetCapture(getRobot(device));
-				captures.set(device, capture);
+				capture = new NetCapture(getRobot(id));
+				captures.set(id, capture);
 			}
 
-			switch (action) {
+			switch (args.action) {
 				case "start":
-					if (app) {
-						validatePackageName(app);
+					if (args.app) {
+						validatePackageName(args.app);
 					}
 
-					return capture.start(decrypt, app);
+					return capture.start(args.decrypt, args.app);
 				case "list":
-					return capture.list(filter, all);
+					return capture.list(args.filter, args.all);
 				case "show":
-					if (id === undefined) {
+					if (args.id === undefined) {
 						throw new ActionableError("id is required for show");
 					}
 
-					return capture.show(id, all);
+					return capture.show(args.id, args.all);
 				default:
 					return capture.stop();
 			}
-		}
-	);
-
-	tool(
-		"screenshot",
-		"Screenshot as a downscaled JPEG. Costs far more tokens than screen; use only for visual checks.",
-		{ device },
-		{ readOnlyHint: true },
-		async ({ device }) => {
-			const { data, mimeType } = shrinkToJpeg(await getRobot(device).getScreenshot());
-			return { type: "image", data: data.toString("base64"), mimeType };
 		}
 	);
 

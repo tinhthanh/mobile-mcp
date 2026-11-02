@@ -7,7 +7,7 @@ Token-lean MCP server for driving a real Android device over `adb`. Fork of
 
 | | upstream mobile-mcp | lite |
 |---|---|---|
-| Tools / schema tokens per session | 34 / ~7,500 | 8 / ~1,000 |
+| Tools / schema tokens per session | 34 / ~7,500 | 10 / ~1,240 |
 | Settings screen read | ~2,300 tokens | ~95 tokens |
 | Action then observe | 2 calls | 1 call (actions return the new screen, or `unchanged`) |
 | Accessibility tree empty (games, canvas) | screenshot (~600+ image tokens) | Apple Vision OCR on macOS (~80 tokens) |
@@ -33,11 +33,20 @@ Texts inside a tappable row are merged into it.
 
 ## Tools
 
-`devices`, `screen {ocr?}`, `tap {x,y | text, mode?}`, `type {text,submit?}`, `swipe {direction,x?,y?,distance?}`,
-`key {button}`, `app {launch|stop|list, package?}`, `screenshot`.
-Every action accepts `observe=false` to skip reading the screen afterwards. With the UiAutomator2 server,
-actions return the screen once two reads agree, so coordinates are not taken mid-animation.
-`tap {text}` finds the element on the current screen (exact label on a tappable line first) and taps it in one call.
+`devices`, `screen {ocr?, image?}`, `tap {x,y | text, mode?}`, `type {text, submit?}`, `swipe {direction, x?, y?, distance?}`,
+`key {button}`, `app {launch|stop|list, package?}`, `wait {text, gone?, timeout?}`, `steps {steps[]}`, `net {...}`.
+`device` is optional when one device is connected. Every action accepts `observe=false` to skip reading the screen
+afterwards. With the UiAutomator2 server, actions return the screen once two reads agree, so coordinates are not
+taken mid-animation. `tap {text}` finds the element on the current screen (exact label on a tappable line first).
+
+`steps` runs a known sequence in one call and returns the final screen, stopping at the first failure:
+
+```json
+{"steps": ["launch com.zing.zalo", "tap Test chat", "type Xin chào", "tap 670,1564", "wait Sent"]}
+```
+
+Actions: `tap <text|x,y>`, `long <text|x,y>`, `type <text>`, `enter`, `key <BUTTON>`, `swipe <dir>`, `wait <text>`,
+`gone <text>`, `launch <package>`, `stop <package>`, `sleep <ms>`.
 
 ## Network capture: `net`
 
