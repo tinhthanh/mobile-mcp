@@ -63,6 +63,12 @@ test.describe("compact screen", () => {
 		]);
 	});
 
+	test("does not merge texts into a tappable view covering most of the screen", async () => {
+		const texts = node(`text="Messages" bounds="[0,300][200,350]"`) + node(`text="Links&#10;Files" bounds="[0,400][720,450]"`);
+		const xml = dump(node(`clickable="true" bounds="[0,0][720,1500]"`, texts));
+		expect(compactScreen(xml).lines).toEqual([" Messages|100,325", " Links Files|360,425"]);
+	});
+
 	test("drops an id-only line stacked on a labelled one at the same point", async () => {
 		const xml = dump(
 			node(`clickable="true" resource-id="g:id/search_widget_ghost_lens" bounds="[600,400][660,500]"`) +

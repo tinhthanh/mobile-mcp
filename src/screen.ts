@@ -35,6 +35,10 @@ export const SCREEN_LEGEND = "Lines are \"<mark><label>|x,y [flags]\" where x,y 
 
 const MAX_LABEL = 60;
 
+// a "tappable" view covering this much of the screen is a container (e.g. a clickable root
+// FrameLayout in zalo); merging its texts would collapse the whole screen into one line
+const CONTAINER_AREA = 0.4;
+
 const children = (node: UiNode): UiNode[] => {
 	if (!node.node) {
 		return [];
@@ -53,8 +57,12 @@ const parseBounds = (bounds?: string): Rect | null => {
 	return { left, top, right, bottom };
 };
 
+// the parser leaves numeric references such as "&#10;" (newline) in attribute values
+const decodeCharRefs = (s: string): string => s.replace(/&#(x[0-9a-fA-F]+|\d+);/g, (_, code: string) =>
+	String.fromCodePoint(code[0] === "x" ? parseInt(code.substring(1), 16) : parseInt(code, 10)));
+
 const ownLabel = (node: UiNode): string => {
-	const s = (v?: string) => (v === undefined ? "" : String(v)).replace(/\s+/g, " ").trim();
+	const s = (v?: string) => decodeCharRefs(v === undefined ? "" : String(v)).replace(/\s+/g, " ").trim();
 	return s(node.text) || s(node["content-desc"]) || s(node.hint);
 };
 
@@ -153,10 +161,24 @@ export const compactScreen = (dump: string): CompactScreen => {
 		}
 	};
 
+	const screenArea = screen ? (screen.right - screen.left) * (screen.bottom - screen.top) : 0;
+	const actionable = (node: UiNode): boolean => {
+		if (isInput(node)) {
+			return true;
+		}
+
+		if (!isTappable(node)) {
+			return false;
+		}
+
+		const r = parseBounds(node.bounds);
+		return !r || !screenArea || (r.right - r.left) * (r.bottom - r.top) < screenArea * CONTAINER_AREA;
+	};
+
 	const walk = (node: UiNode) => {
 		const r = parseBounds(node.bounds);
 		if (r && visible(r) && node.displayed !== "false") {
-			if (isTappable(node) || isInput(node)) {
+			if (actionable(node)) {
 				const texts: string[] = [];
 				const own = ownLabel(node);
 				if (own) {
@@ -174,7 +196,7 @@ export const compactScreen = (dump: string): CompactScreen => {
 		}
 
 		for (const child of children(node)) {
-			if (isTappable(node) || isInput(node) || hasTappableAncestor.has(node)) {
+			if (actionable(node) || hasTappableAncestor.has(node)) {
 				hasTappableAncestor.add(child);
 			}
 
@@ -188,7 +210,17 @@ export const compactScreen = (dump: string): CompactScreen => {
 	// widgets often stack an id-only view on top of the labelled one ("search_widget_ghost_lens" over
 	// "Camera search"); keep the readable line for that tap point
 	const labelled = new Set(entries.filter(e => !e.fallback).map(e => e.point));
-	const lines = entries.filter(e => !e.fallback || !labelled.has(e.point)).map(e => e.line);
+	const seen = new Set<string>();
+	const lines = entries.filter(e => {
+		if (!e.fallback) {
+			return true;
+		}
+
+		// several unlabelled views on one point ("~RecyclerView", "~contentList") need only one line
+		const keep = !labelled.has(e.point) && !seen.has(e.point);
+		seen.add(e.point);
+		return keep;
+	}).map(e => e.line);
 
 	return { app: roots.find(r => r.package)?.package || "unknown", lines };
 };
