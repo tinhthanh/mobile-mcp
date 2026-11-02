@@ -14,6 +14,9 @@ import { ActionableError } from "./robot";
 // the host matches `decrypt` and the app trusts the mitmproxy ca.
 const ADDON = path.join(__dirname, "..", "native", "net_addon.py");
 const LIST_LIMIT = 50;
+
+// browser/transport noise that rarely matters when debugging an api; show {all} keeps them
+const NOISY_HEADER = /^(sec-ch-|sec-fetch-|accept|priority$|upgrade-insecure-requests$|x-content-type-options$|access-control-|date$|connection$|proxy-connection$|keep-alive$|via$|alt-svc$|server-timing$|nel$|report-to$)/i;
 const MAX_PATH = 80;
 
 interface Summary {
@@ -179,13 +182,16 @@ export class NetCapture {
 		return out.length ? out.join("\n") + state : `no new requests${state}`;
 	}
 
-	public show(id: number): string {
+	public show(id: number, all?: boolean): string {
 		const detail = readJsonl<any>(this.detailFile).find(d => d.id === id);
 		if (!detail) {
 			throw new ActionableError(`No details for #${id}; only decrypted or plain http requests have them`);
 		}
 
-		const headers = (h: Record<string, string>) => Object.entries(h || {}).map(([k, v]) => `  ${k}: ${v}`).join("\n");
+		const headers = (h: Record<string, string>) => Object.entries(h || {})
+			.filter(([k]) => all || !NOISY_HEADER.test(k))
+			.map(([k, v]) => `  ${k}: ${v}`)
+			.join("\n");
 		return [
 			detail.url,
 			"request headers:", headers(detail.req_headers),

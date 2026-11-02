@@ -396,7 +396,7 @@ export const createMcpServer = (): McpServer => {
 			device,
 			action: z.enum(["start", "list", "show", "stop"]),
 			filter: z.string().optional().describe("list: substring of host or path"),
-			all: z.boolean().optional().describe("list: include requests already listed"),
+			all: z.boolean().optional().describe("list: include requests already listed; show: keep browser/transport headers"),
 			id: z.number().int().optional().describe("show: request id from list"),
 			decrypt: z.string().optional().describe("start: regex of hosts to decrypt, e.g. api\\.myapp\\.com"),
 		},
@@ -418,7 +418,7 @@ export const createMcpServer = (): McpServer => {
 						throw new ActionableError("id is required for show");
 					}
 
-					return capture.show(id);
+					return capture.show(id, all);
 				default:
 					return capture.stop();
 			}
