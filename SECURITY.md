@@ -1,26 +1,34 @@
 # Security Policy
 
-## Supported Versions
+## Reporting a vulnerability
 
-All versions of this project are currently being supported with security updates.
+Report privately through GitHub: **Security > Report a vulnerability** on
+[tinhthanh/mobile-mcp](https://github.com/tinhthanh/mobile-mcp/security). Please do not open a public issue.
+Issues that also affect upstream should go to [mobile-next/mobile-mcp](https://github.com/mobile-next/mobile-mcp/security) as well.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| All     | :white_check_mark: |
+## What this server can do to a device
 
-## Important notes regarding use of mobile-mcp
+mobile-lite gives an agent the same control over the phone as a person holding it. Use a phone set aside for testing.
 
-**mobile-mcp** is an MCP server for controlling a mobile device. Device may be a real iOS device, real Android device, an iOS Simulator or Android
-Emulator.
+- **Agent actions.** An agent can tap, type and launch anything. Prompt injection from screen content can steer it.
+  The `android-tester` subagent refuses to send, call, pay or change settings unless the task asks for that exact
+  action, but review what agents do. `open_url` and app install/uninstall from upstream were removed.
+- **UiAutomator2 server.** While it runs (started on demand, stopped after 5 idle minutes and on exit) any app on the
+  device can reach it on `localhost:6790` and drive the UI.
+- **Network capture (`net`).**
+  - The proxy mode sets the device's global `http_proxy`; it is cleared on stop, on exit and on the next run after a
+    hard kill. Traffic goes over USB through `adb reverse`; nothing listens on the LAN.
+  - Decrypting HTTPS needs the mitmproxy CA as a user CA. Whoever holds `~/.mitmproxy/mitmproxy-ca.pem` can then read
+    the HTTPS of every app that trusts user CAs on that phone, browsers included. Install it only on test phones and
+    remove it when done.
+  - `show` redacts auth/cookie headers and credential-like values, but captured bodies can still hold personal data
+    and end up in the agent's context.
+  - PCAPdroid api keys live in `~/.config/mobile-mcp-lite/keys.env` (mode 600). A key lets any process with adb
+    access start a capture without the on-device prompt.
+- **HTTP transport.** `--listen` serves MCP over HTTP without auth unless `MOBILEMCP_AUTH` is set; prefer stdio.
 
-You may use mobile-mcp for various tasks, such as app development, marketing automation, quality assurance and so on.
+## Supply chain
 
-As a rule of thumb, verify which tools your Agent is invoking. It has access to the device or simulator, it may operate the device to the security
-scope of that device. It is suggested that you use a device that is purposed for this use.
-
-## Reporting a Vulnerability
-
-To report a security vulnerability, please join our Slack channel at http://mobilenexthq.com/join-slack and DM the moderators with details of the vulnerability.
-
-We take all security reports seriously and will respond as quickly as possible.
-
+`scripts/setup.sh` pins every APK by SHA-256 (UiAutomator2 10.6.6: GitHub release identical to the npm package, which
+has SLSA provenance; PCAPdroid 2.0.2: F-Droid build whose dex matches the developer's GitHub release). There is no
+telemetry and no closed-source binary; `npm ci --ignore-scripts` is used everywhere.

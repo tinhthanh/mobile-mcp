@@ -1,3 +1,26 @@
+# Changelog
+
+## 0.2.0 (lite, 2026-11-02)
+
+Android-only rewrite of mobile-mcp 1.0.15 for token-lean agent use.
+
+* Tools: 10 tools (~1,240 schema tokens) instead of 34 (~7,500): `devices`, `screen`, `tap`, `type`, `swipe`, `key`,
+  `app`, `wait`, `steps`, `net`. `device` is optional with one phone; actions return the settled screen or
+  `unchanged`; calls are serialized.
+* Screen: one line per element with its tap point (~95 tokens for Settings vs ~2,300); child texts merged into
+  tappable rows; full-screen clickable containers no longer swallow texts; `&#10;` decoded; Apple Vision OCR fallback.
+* Speed and typing: Appium UiAutomator2 server 10.6.6 with `ignoreUnimportantViews` (~80 ms reads), Unicode
+  `setText`; apps launch through `am start` (~0.3 s instead of ~3 s with monkey).
+* Network: `net` captures through mitmproxy over USB (selective HTTPS decryption, redacted `show`) or PCAPdroid per
+  app; stale proxies are cleared automatically.
+* Agent: `android-tester` subagent and `scripts/run-test.sh`.
+* Setup: `scripts/setup.sh host|device|register|verify|clean` with pinned APK hashes; Vietnamese guide in
+  `docs/SETUP.md`.
+* Removed: iOS, simulators, cloud devices, recording, logs/crashes, install/uninstall, `open_url`, orientation,
+  PostHog/Scarf telemetry, the `mobilecli`/`mobilewright` dependency (FSL-1.1 binary), the install helper and plugin.
+
+## Upstream mobile-mcp history
+
 ## [1.0.15](https://github.com/mobile-next/mobile-mcp/releases/tag/1.0.15) (2026-10-30)
 * Feat: `mobile_clear_app_data` clears an app's data on Android and iOS Simulator ([#524](https://github.com/mobile-next/mobile-mcp/pull/524))
 * Fix: `mobile_save_screenshot` and `mobile_get_device_logs` replace the output file by rename, so a hard link at `saveTo` is never written through ([#533](https://github.com/mobile-next/mobile-mcp/pull/533)), thanks to [@Daniel-GrunbergerCA](https://github.com/Daniel-GrunbergerCA)

@@ -6,7 +6,7 @@ Hướng dẫn cài để Claude Code (hoặc agent khác qua MCP) điều khi�
 ## Nhanh: 4 lệnh
 
 ```bash
-git clone -b lite https://github.com/tinhthanh/mobile-mcp.git && cd mobile-mcp
+git clone https://github.com/tinhthanh/mobile-mcp.git && cd mobile-mcp
 scripts/setup.sh host            # một lần trên Mac: adb, mitmproxy, build
 scripts/setup.sh device          # mỗi điện thoại (thêm <serial> nếu cắm nhiều máy)
 scripts/setup.sh register        # một lần cho mỗi Mac: đăng ký MCP "mobile-lite" vào Claude Code

@@ -1,6 +1,6 @@
 {
   "name": "mobile-mcp-lite",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Token-lean Android MCP server over adb, fork of mobile-next/mobile-mcp",
   "repository": {
     "type": "git",
