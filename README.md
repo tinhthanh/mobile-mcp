@@ -39,6 +39,26 @@ Every action accepts `observe=false` to skip reading the screen afterwards. With
 actions return the screen once two reads agree, so coordinates are not taken mid-animation.
 `tap {text}` finds the element on the current screen (exact label on a tappable line first) and taps it in one call.
 
+## Network capture: `net`
+
+`net {start | list | show {id} | stop}` captures the device's HTTP(S) requests with mitmproxy
+(`brew install mitmproxy`), reached over USB with `adb reverse` plus the device's global `http_proxy`:
+no root, nothing listening on the LAN.
+
+```
+#1 POST 200 httpbin.org/post 481B 557ms application/json
+tls (not decrypted): www.google.com, api.example.com×3
+```
+
+- `list` returns only requests since the previous list (`all=true` for everything), `filter` matches host/path.
+- HTTPS is passed through and only the host is recorded, so apps keep working. `start {decrypt:"api\\.myapp\\.com"}`
+  decrypts matching hosts; that needs the mitmproxy CA installed as a user CA and an app that trusts user CAs
+  (a debug build with `network_security_config`).
+- Only apps honoring the system proxy show up (OkHttp/HttpURLConnection do; Zalo, Flutter and custom sockets mostly do not).
+- `show` redacts auth/cookie headers and credential-like keys and bearer tokens in bodies; bodies are cut at 2,000 chars.
+- The proxy is cleared on `stop` and when the server exits. If the server is killed hard, restore the device's
+  internet with `adb shell settings put global http_proxy :0`.
+
 ## Install (Claude Code)
 
 ```bash

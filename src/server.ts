@@ -12,6 +12,7 @@ import { compactScreen, findLine, SCREEN_LEGEND } from "./screen";
 import { ocrLines } from "./ocr";
 import { validatePackageName } from "./utils";
 import { Uia2Client } from "./uia2";
+import { NetCapture } from "./net";
 
 // below this many lines the accessibility tree is probably useless (game, canvas, flutter)
 const OCR_FALLBACK_MIN_LINES = 3;
@@ -72,10 +73,19 @@ const shrinkToJpeg = (png: Buffer): { data: Buffer, mimeType: string } => {
 const robots = new Map<string, AndroidRobot>();
 const uia2Clients = new Map<string, Uia2Client | null>();
 const lastScreen = new Map<string, string>();
+const captures = new Map<string, NetCapture>();
 
 process.on("exit", () => {
 	for (const client of uia2Clients.values()) {
 		client?.stop();
+	}
+
+	for (const capture of captures.values()) {
+		if (capture.running) {
+			capture.stop();
+		}
+
+		capture.removeFiles();
 	}
 });
 
@@ -375,6 +385,43 @@ export const createMcpServer = (): McpServer => {
 			}
 
 			return afterAction(device, observe !== false);
+		}
+	);
+
+	tool(
+		"net",
+		"Capture the device's HTTP(S) requests through mitmproxy over USB. start, use the app, then list (only new requests since the last list) and show {id} for headers/bodies; always stop when done or the device keeps a dead proxy. " +
+			"Only apps honoring the system proxy appear. HTTPS shows hosts only unless decrypt matches the host and the app trusts the mitmproxy CA (debug builds with network_security_config).",
+		{
+			device,
+			action: z.enum(["start", "list", "show", "stop"]),
+			filter: z.string().optional().describe("list: substring of host or path"),
+			all: z.boolean().optional().describe("list: include requests already listed"),
+			id: z.number().int().optional().describe("show: request id from list"),
+			decrypt: z.string().optional().describe("start: regex of hosts to decrypt, e.g. api\\.myapp\\.com"),
+		},
+		{ destructiveHint: true },
+		async ({ device, action, filter, all, id, decrypt }) => {
+			let capture = captures.get(device);
+			if (!capture) {
+				capture = new NetCapture(getRobot(device));
+				captures.set(device, capture);
+			}
+
+			switch (action) {
+				case "start":
+					return capture.start(decrypt);
+				case "list":
+					return capture.list(filter, all);
+				case "show":
+					if (id === undefined) {
+						throw new ActionableError("id is required for show");
+					}
+
+					return capture.show(id);
+				default:
+					return capture.stop();
+			}
 		}
 	);
 
