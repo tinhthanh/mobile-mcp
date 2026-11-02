@@ -63,6 +63,11 @@ tls (not decrypted): www.google.com, api.example.com×3
 - The proxy is cleared on `stop` and when the server exits. If the server is killed hard, restore the device's
   internet with `adb shell settings put global http_proxy :0`.
 
+## Setting up a new device
+
+`scripts/setup.sh host | device | register | verify | clean` installs and checks everything (pinned APK hashes);
+see [docs/SETUP.md](docs/SETUP.md) (Vietnamese) for the manual steps and troubleshooting.
+
 ## Install (Claude Code)
 
 ```bash

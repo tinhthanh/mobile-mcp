@@ -117,8 +117,14 @@ export class NetCapture {
 		return path.join(this.dir, "detail.jsonl");
 	}
 
+	// each device generates its own key: PCAPDROID_API_KEY_<serial> wins over PCAPDROID_API_KEY
+	private apiKey(): string | undefined {
+		const serial = this.robot.deviceId.replace(/[^A-Za-z0-9]/g, "_");
+		return process.env[`PCAPDROID_API_KEY_${serial}`] || process.env.PCAPDROID_API_KEY;
+	}
+
 	private pcapdroid(action: string, ...extras: string[]) {
-		const key = process.env.PCAPDROID_API_KEY;
+		const key = this.apiKey();
 		const auth = key ? ["-e", "api_key", key] : [];
 		this.robot.adb("shell", "am", "start", "-e", "action", action, ...auth, ...extras, "-n", PCAPDROID_CTRL);
 	}
@@ -134,7 +140,7 @@ export class NetCapture {
 		this.pcapName = `mobile-mcp-${Date.now()}.pcap`;
 		this.pcapdroid("start", "-e", "app_filter", app, "-e", "pcap_dump_mode", "pcap_file", "-e", "pcap_name", this.pcapName);
 		await sleep(1500);
-		const consent = process.env.PCAPDROID_API_KEY ? "" : " (no PCAPDROID_API_KEY: approve the prompts on the device)";
+		const consent = this.apiKey() ? "" : " (no PCAPDROID_API_KEY: approve the prompts on the device)";
 		return `capturing ${app} with PCAPdroid, hosts only${consent}`;
 	}
 

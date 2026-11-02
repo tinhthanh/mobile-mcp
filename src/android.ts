@@ -74,7 +74,7 @@ type AndroidDeviceType = "tv" | "mobile";
 
 export class AndroidRobot implements Robot {
 
-	public constructor(private deviceId: string) {
+	public constructor(public readonly deviceId: string) {
 	}
 
 	public adb(...args: string[]): Buffer {
