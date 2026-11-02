@@ -157,10 +157,36 @@ export class AndroidRobot implements Robot {
 			}
 		}
 
+		// am start takes ~0.3s where monkey takes ~3s on low-end devices
+		const activity = this.resolveLauncherActivity(packageName);
+		if (activity) {
+			// "$" in nested activity classes would expand in the device shell
+			const output = this.silentAdb("shell", "am", "start", "-n", activity.replace(/\$/g, "\\$")).toString();
+			if (!output.includes("Error")) {
+				return;
+			}
+		}
+
 		try {
 			this.silentAdb("shell", "monkey", "-p", packageName, "-c", "android.intent.category.LAUNCHER", "1");
 		} catch (error) {
 			throw new ActionableError(`Failed launching app with package name "${packageName}", please make sure it exists`);
+		}
+	}
+
+	private resolveLauncherActivity(packageName: string): string | null {
+		try {
+			const lines = this.silentAdb("shell", "cmd", "package", "resolve-activity", "--brief", "-c", "android.intent.category.LAUNCHER", packageName)
+				.toString()
+				.split("\n")
+				.map(line => line.trim())
+				.filter(line => line !== "");
+			const last = lines[lines.length - 1] || "";
+			// the component goes through the device shell, so accept only a plain component name
+			return last.startsWith(`${packageName}/`) && /^[\w.]+\/[\w.$]+$/.test(last) ? last : null;
+		} catch (error) {
+			// resolve-activity is missing on old android versions
+			return null;
 		}
 	}
 

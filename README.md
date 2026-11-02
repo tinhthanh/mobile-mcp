@@ -33,9 +33,11 @@ Texts inside a tappable row are merged into it.
 
 ## Tools
 
-`devices`, `screen {ocr?}`, `tap {x,y,mode?}`, `type {text,submit?}`, `swipe {direction,x?,y?,distance?}`,
+`devices`, `screen {ocr?}`, `tap {x,y | text, mode?}`, `type {text,submit?}`, `swipe {direction,x?,y?,distance?}`,
 `key {button}`, `app {launch|stop|list, package?}`, `screenshot`.
-Every action accepts `observe=false` to skip reading the screen afterwards.
+Every action accepts `observe=false` to skip reading the screen afterwards. With the UiAutomator2 server,
+actions return the screen once two reads agree, so coordinates are not taken mid-animation.
+`tap {text}` finds the element on the current screen (exact label on a tappable line first) and taps it in one call.
 
 ## Install (Claude Code)
 
@@ -64,4 +66,3 @@ and check their SHA-256 against the release before `adb install`.
 ## Known limits
 
 - `type` replaces the field when the UiAutomator2 server is used, but appends (ASCII only) without it.
-- `app launch` goes through `monkey` and takes ~4 s on low-end phones.

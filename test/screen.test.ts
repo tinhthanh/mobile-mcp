@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
 
-import { compactScreen } from "../src/screen";
+import { compactScreen, findLine } from "../src/screen";
 
 const fixture = (name: string) => fs.readFileSync(path.join(__dirname, "fixtures", name), "utf8");
 
@@ -61,5 +61,37 @@ test.describe("compact screen", () => {
 			"*Next|50,50 off",
 			"#Email|360,150 focus",
 		]);
+	});
+
+	test("drops an id-only line stacked on a labelled one at the same point", async () => {
+		const xml = dump(
+			node(`clickable="true" resource-id="g:id/search_widget_ghost_lens" bounds="[600,400][660,500]"`) +
+			node(`clickable="true" content-desc="Camera search" bounds="[600,400][660,500]"`) +
+			node(`clickable="true" resource-id="g:id/only_id" bounds="[0,400][100,500]"`));
+		expect(compactScreen(xml).lines).toEqual(["*Camera search|630,450", "*only_id|50,450"]);
+	});
+});
+
+test.describe("find line", () => {
+
+	const screen = [
+		"app=com.android.settings",
+		" Display|412,159",
+		"*Display size · Default|360,1170",
+		"*Display|360,1159",
+		"*Hiển thị|360,200",
+	].join("\n");
+
+	test("prefers an exact label on a tappable line", async () => {
+		expect(findLine(screen, "display")).toMatchObject({ x: 360, y: 1159, matches: 1 });
+	});
+
+	test("matches a merged label part and unicode text", async () => {
+		expect(findLine(screen, "Default")).toMatchObject({ x: 360, y: 1170 });
+		expect(findLine(screen, "hiển thị")).toMatchObject({ x: 360, y: 200 });
+	});
+
+	test("returns null when nothing matches", async () => {
+		expect(findLine(screen, "Bluetooth")).toBeNull();
 	});
 });

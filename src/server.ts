@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import { trace } from "./logger";
 import { AndroidRobot, AndroidDeviceManager } from "./android";
 import { ActionableError, Button } from "./robot";
-import { compactScreen, SCREEN_LEGEND } from "./screen";
+import { compactScreen, findLine, SCREEN_LEGEND } from "./screen";
 import { ocrLines } from "./ocr";
 import { validatePackageName } from "./utils";
 import { Uia2Client } from "./uia2";
@@ -16,6 +16,9 @@ import { Uia2Client } from "./uia2";
 // below this many lines the accessibility tree is probably useless (game, canvas, flutter)
 const OCR_FALLBACK_MIN_LINES = 3;
 const SETTLE_MS = 500;
+// with the uia2 server a read is ~0.4s, cheap enough to poll until two reads agree
+const STABLE_MIN_MS = 300;
+const STABLE_MAX_MS = 4000;
 const SCREENSHOT_MAX_SIZE = 1024;
 
 const BUTTONS = ["BACK", "HOME", "ENTER", "VOLUME_UP", "VOLUME_DOWN", "DPAD_CENTER", "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT"] as const;
@@ -145,7 +148,7 @@ export const createMcpServer = (): McpServer => {
 		}) as any);
 	};
 
-	const readScreen = async (deviceId: string, forceOcr: boolean): Promise<string> => {
+	const captureScreen = async (deviceId: string, forceOcr: boolean): Promise<string> => {
 		const robot = getRobot(deviceId);
 		const source = await getUia2(deviceId)?.getSource() ?? await robot.getUiAutomatorDump();
 		const { app, lines } = compactScreen(source);
@@ -160,7 +163,11 @@ export const createMcpServer = (): McpServer => {
 			}
 		}
 
-		const text = [`app=${app}${via}`, ...body].join("\n");
+		return [`app=${app}${via}`, ...body].join("\n");
+	};
+
+	// returns "unchanged" when the screen is what the agent saw last
+	const report = (deviceId: string, text: string): string => {
 		if (lastScreen.get(deviceId) === text) {
 			return "unchanged";
 		}
@@ -169,14 +176,35 @@ export const createMcpServer = (): McpServer => {
 		return text;
 	};
 
-	const afterAction = async (deviceId: string, observe: boolean): Promise<string> => {
-		if (!observe) {
-			lastScreen.delete(deviceId);
-			return "ok";
+	// waits for the ui to settle so the agent does not get a half-drawn transition
+	const settledScreen = async (deviceId: string): Promise<string> => {
+		if (!getUia2(deviceId)) {
+			await sleep(SETTLE_MS);
+			return captureScreen(deviceId, false);
 		}
 
-		await sleep(SETTLE_MS);
-		return readScreen(deviceId, false);
+		await sleep(STABLE_MIN_MS);
+		const deadline = Date.now() + STABLE_MAX_MS;
+		let previous = await captureScreen(deviceId, false);
+		while (Date.now() < deadline) {
+			const current = await captureScreen(deviceId, false);
+			if (current === previous) {
+				break;
+			}
+
+			previous = current;
+		}
+
+		return previous;
+	};
+
+	const afterAction = async (deviceId: string, observe: boolean, prefix = ""): Promise<string> => {
+		if (!observe) {
+			lastScreen.delete(deviceId);
+			return prefix + "ok";
+		}
+
+		return prefix + report(deviceId, await settledScreen(deviceId));
 	};
 
 	const device = z.string().describe("Device id from devices");
@@ -207,23 +235,41 @@ export const createMcpServer = (): McpServer => {
 		{ readOnlyHint: true },
 		async ({ device, ocr }) => {
 			lastScreen.delete(device);
-			return readScreen(device, !!ocr);
+			return report(device, await captureScreen(device, !!ocr));
 		}
 	);
 
 	tool(
 		"tap",
-		"Tap at x,y taken from a screen line.",
+		"Tap at x,y from a screen line, or on the element whose label matches text (one call instead of screen + tap).",
 		{
 			device,
-			x: z.number().int(),
-			y: z.number().int(),
+			x: z.number().int().optional(),
+			y: z.number().int().optional(),
+			text: z.string().optional().describe("Label to find on the current screen, used when x,y are not given"),
 			mode: z.enum(["tap", "double", "long"]).optional(),
 			observe,
 		},
 		{ destructiveHint: true },
-		async ({ device, x, y, mode, observe }) => {
+		async ({ device, x, y, text, mode, observe }) => {
 			const robot = getRobot(device);
+			let prefix = "";
+			if (x === undefined || y === undefined) {
+				if (!text) {
+					throw new ActionableError("Give x,y or text");
+				}
+
+				const screen = await captureScreen(device, false);
+				const found = findLine(screen, text);
+				if (!found) {
+					lastScreen.set(device, screen);
+					throw new ActionableError(`No element matches "${text}". Current screen:\n${screen}\n`);
+				}
+
+				({ x, y } = found);
+				prefix = `tapped ${found.line}` + (found.matches > 1 ? ` (first of ${found.matches} matches)` : "") + "\n";
+			}
+
 			if (mode === "double") {
 				await robot.doubleTap(x, y);
 			} else if (mode === "long") {
@@ -232,7 +278,7 @@ export const createMcpServer = (): McpServer => {
 				await robot.tap(x, y);
 			}
 
-			return afterAction(device, observe !== false);
+			return afterAction(device, observe !== false, prefix);
 		}
 	);
 
@@ -324,7 +370,6 @@ export const createMcpServer = (): McpServer => {
 			validatePackageName(pkg);
 			if (action === "launch") {
 				await robot.launchApp(pkg);
-				await sleep(SETTLE_MS);
 			} else {
 				await robot.terminateApp(pkg);
 			}

@@ -107,7 +107,14 @@ export const compactScreen = (dump: string): CompactScreen => {
 	const roots = children(parsed.hierarchy || {});
 	const screen = roots.map(r => parseBounds(r.bounds)).find(r => r !== null) || null;
 
-	const lines: string[] = [];
+	interface Entry {
+		line: string;
+		point: string;
+		// label is a resource id or class name, not something a person reads
+		fallback: boolean;
+	}
+
+	const entries: Entry[] = [];
 	const visible = (r: Rect) => {
 		if (r.right <= r.left || r.bottom <= r.top) {
 			return false;
@@ -121,7 +128,7 @@ export const compactScreen = (dump: string): CompactScreen => {
 		return cx >= screen.left && cx <= screen.right && cy >= screen.top && cy <= screen.bottom;
 	};
 
-	const emit = (mark: string, label: string, r: Rect, node: UiNode) => {
+	const emit = (mark: string, label: string, fallback: boolean, r: Rect, node: UiNode) => {
 		const flags: string[] = [];
 		if (isTrue(node.checked)) {
 			flags.push("on");
@@ -139,10 +146,10 @@ export const compactScreen = (dump: string): CompactScreen => {
 			flags.push("focus");
 		}
 
-		const x = (r.left + r.right) >> 1, y = (r.top + r.bottom) >> 1;
-		const line = `${mark}${truncate(label)}|${x},${y}` + (flags.length ? ` ${flags.join(" ")}` : "");
-		if (!lines.includes(line)) {
-			lines.push(line);
+		const point = `${(r.left + r.right) >> 1},${(r.top + r.bottom) >> 1}`;
+		const line = `${mark}${truncate(label)}|${point}` + (flags.length ? ` ${flags.join(" ")}` : "");
+		if (!entries.some(e => e.line === line)) {
+			entries.push({ line, point, fallback });
 		}
 	};
 
@@ -157,12 +164,12 @@ export const compactScreen = (dump: string): CompactScreen => {
 				}
 
 				collectTexts(node, texts);
-				const label = texts.join(" · ") || shortId(node) || shortClass(node);
-				emit(isInput(node) ? "#" : "*", label, r, node);
+				const label = texts.join(" · ");
+				emit(isInput(node) ? "#" : "*", label || shortId(node) || shortClass(node), !label, r, node);
 			} else if (isTrue(node.scrollable)) {
-				emit("~", ownLabel(node) || shortId(node) || shortClass(node), r, node);
+				emit("~", ownLabel(node) || shortId(node) || shortClass(node), !ownLabel(node), r, node);
 			} else if (ownLabel(node) && !hasTappableAncestor.has(node)) {
-				emit(" ", ownLabel(node), r, node);
+				emit(" ", ownLabel(node), false, r, node);
 			}
 		}
 
@@ -178,5 +185,36 @@ export const compactScreen = (dump: string): CompactScreen => {
 	const hasTappableAncestor = new Set<UiNode>();
 	roots.forEach(walk);
 
+	// widgets often stack an id-only view on top of the labelled one ("search_widget_ghost_lens" over
+	// "Camera search"); keep the readable line for that tap point
+	const labelled = new Set(entries.filter(e => !e.fallback).map(e => e.point));
+	const lines = entries.filter(e => !e.fallback || !labelled.has(e.point)).map(e => e.line);
+
 	return { app: roots.find(r => r.package)?.package || "unknown", lines };
+};
+
+const normalize = (s: string) => s.normalize("NFC").toLowerCase().replace(/\s+/g, " ").trim();
+
+// finds the line to tap for text: exact label part on a tappable line wins,
+// then exact on any line, then substring
+export const findLine = (screen: string, text: string): { line: string, x: number, y: number, matches: number } | null => {
+	const wanted = normalize(text);
+	const rows = screen.split("\n").slice(1).map(line => {
+		const bar = line.lastIndexOf("|");
+		const [x, y] = line.substring(bar + 1).split(" ")[0].split(",").map(Number);
+		const parts = line.substring(1, bar).split(" · ").map(normalize);
+		const tappable = line[0] === "*" || line[0] === "#";
+		const exact = parts.includes(wanted);
+		const partial = parts.some(p => p.includes(wanted));
+		const rank = exact && tappable ? 0 : exact ? 1 : partial && tappable ? 2 : partial ? 3 : 9;
+		return { line, x, y, rank };
+	}).filter(row => row.rank < 9);
+
+	if (rows.length === 0) {
+		return null;
+	}
+
+	const best = Math.min(...rows.map(row => row.rank));
+	const top = rows.filter(row => row.rank === best);
+	return { ...top[0], matches: top.length };
 };
