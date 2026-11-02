@@ -109,6 +109,15 @@ const getRobot = (deviceId: string): AndroidRobot => {
 	return robot;
 };
 
+// agents sometimes send "key BACK", "tap", "type" as parallel tool calls in one turn; phone
+// actions only make sense in order, so every call waits for the previous one to finish
+let queue: Promise<unknown> = Promise.resolve();
+const serialized = <T>(fn: () => Promise<T>): Promise<T> => {
+	const run = queue.then(fn);
+	queue = run.catch(() => undefined);
+	return run;
+};
+
 let cachedDevices: { at: number, ids: string[] } | null = null;
 
 // the device param is optional: with a single connected device there is nothing to choose
@@ -170,7 +179,7 @@ export const createMcpServer = (): McpServer => {
 		}, (async (args: any) => {
 			try {
 				trace(`Invoking ${name} with args: ${JSON.stringify(args)}`);
-				const response = await cb(args);
+				const response = await serialized(() => cb(args));
 				if (typeof response === "string") {
 					trace(`=> ${response}`);
 					return { content: [{ type: "text", text: response }] };

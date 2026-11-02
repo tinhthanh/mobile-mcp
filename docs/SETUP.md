@@ -15,6 +15,20 @@ scripts/setup.sh verify          # kiểm tra lại
 
 Sau đó mở phiên Claude Code mới và giao việc, ví dụ: *"Mở Zalo, bắt traffic 15 giây và cho tôi biết nó gọi tới domain nào"*.
 
+## Subagent `android-tester`
+
+`register` cài subagent [`.claude/agents/android-tester.md`](../.claude/agents/android-tester.md): chỉ được dùng tool `mobile-lite`,
+chạy Sonnet, có sẵn quy tắc an toàn (không gửi tin, gọi điện, thanh toán, đổi cài đặt nếu nhiệm vụ không yêu cầu đúng việc đó)
+và báo cáo dạng PASS/FAIL kèm dòng màn hình làm bằng chứng.
+
+- Trong Claude Code: *"Dùng android-tester kiểm tra luồng đăng nhập của app com.example: …"* — agent chính giao việc, chỉ nhận lại báo cáo.
+- Chạy riêng, rẻ nhất (cho CI hoặc script):
+  ```bash
+  claude -p "Smoke test: mở Cài đặt, vào Display, Dark mode đang On hay Off?" \
+    --agent android-tester --allowedTools "mcp__mobile-lite__*"
+  ```
+  Đo trên ZTE Blade A54: smoke test 3 phần (UI, gõ tiếng Việt, network Zalo) mất 9 lượt, 39 s, ~$0,04.
+
 ## Việc phải làm tay
 
 | Khi nào | Làm gì |

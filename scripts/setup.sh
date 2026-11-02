@@ -3,7 +3,7 @@
 #
 #   scripts/setup.sh host                 adb, mitmproxy, build
 #   scripts/setup.sh device [serial]      UiAutomator2 server, PCAPdroid (+ api key), mitmproxy CA file
-#   scripts/setup.sh register             add the MCP server to Claude Code (once per Mac)
+#   scripts/setup.sh register             add the MCP server and the android-tester subagent to Claude Code (once per Mac)
 #   scripts/setup.sh verify [serial]      check everything on a device
 #   scripts/setup.sh clean [serial]       remove what `device` installed (the user CA is removed by hand)
 #
@@ -216,7 +216,10 @@ cmd_register() {
 	claude mcp remove mobile-lite -s user >/dev/null 2>&1 || true
 	# api keys stay in $KEYS, which the server reads itself, so ~/.claude.json holds no secret
 	claude mcp add -s user mobile-lite -- node "$REPO/lib/index.js" >/dev/null
-	ok "đã đăng ký mobile-lite; key PCAPdroid đọc từ $KEYS. Mở phiên Claude Code mới để dùng"
+	ok "đã đăng ký mobile-lite; key PCAPdroid đọc từ $KEYS"
+	mkdir -p "$HOME/.claude/agents"
+	ln -sfn "$REPO/.claude/agents/android-tester.md" "$HOME/.claude/agents/android-tester.md"
+	ok "đã cài subagent android-tester (~/.claude/agents). Mở phiên Claude Code mới để dùng"
 }
 
 cmd_verify() {
