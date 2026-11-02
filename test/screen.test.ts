@@ -97,6 +97,12 @@ test.describe("find line", () => {
 		expect(findLine(screen, "hiển thị")).toMatchObject({ x: 360, y: 200 });
 	});
 
+	test("treats typographic quotes and dashes like plain ones", async () => {
+		const dialog = "app=com.google.android.permissioncontroller\n*Don’t allow|360,1036\n*Wi‑Fi – settings|360,400";
+		expect(findLine(dialog, "Don't allow")).toMatchObject({ x: 360, y: 1036 });
+		expect(findLine(dialog, "wi-fi - settings")).toMatchObject({ y: 400 });
+	});
+
 	test("returns null when nothing matches", async () => {
 		expect(findLine(screen, "Bluetooth")).toBeNull();
 	});

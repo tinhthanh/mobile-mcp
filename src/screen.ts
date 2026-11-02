@@ -225,7 +225,12 @@ export const compactScreen = (dump: string): CompactScreen => {
 	return { app: roots.find(r => r.package)?.package || "unknown", lines };
 };
 
-const normalize = (s: string) => s.normalize("NFC").toLowerCase().replace(/\s+/g, " ").trim();
+// typographic quotes and dashes ("Don’t allow") match what an agent types ("Don't allow")
+const normalize = (s: string) => s.normalize("NFC")
+	.replace(/[\u2018\u2019\u201A\u2032\u00B4`]/g, "'")
+	.replace(/[\u201C\u201D\u201E\u2033]/g, "\"")
+	.replace(/[\u2010-\u2015\u2212]/g, "-")
+	.toLowerCase().replace(/\s+/g, " ").trim();
 
 // finds the line to tap for text: exact label part on a tappable line wins,
 // then exact on any line, then substring
