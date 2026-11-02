@@ -99,8 +99,12 @@ export class Uia2Client {
 		await this.start();
 		const created = await this.request("POST", "/session", { capabilities: { alwaysMatch: { platformName: "Android" } } });
 		const sessionId: string = created.sessionId ?? (await this.request("GET", "/sessions"))[0]?.id;
-		// the default waits for an idle ui, which is what makes `uiautomator dump` slow
-		await this.request("POST", `/session/${sessionId}/appium/settings`, { settings: { waitForIdleTimeout: 0, waitForSelectorTimeout: 0 } });
+		// the default waits for an idle ui, which is what makes `uiautomator dump` slow.
+		// ignoreUnimportantViews cuts page source from ~500 to ~170 ms on uia2 10.x; it only drops
+		// unlabelled views (e.g. a bare RecyclerView), which the compact screen mostly skips anyway
+		await this.request("POST", `/session/${sessionId}/appium/settings`, {
+			settings: { waitForIdleTimeout: 0, waitForSelectorTimeout: 0, ignoreUnimportantViews: !process.env.MOBILEMCP_ALL_VIEWS },
+		});
 		this.sessionId = sessionId;
 		return sessionId;
 	}
@@ -148,7 +152,7 @@ export class Uia2Client {
 
 	// replaces the focused input's text (setText ignores replace=false on uia2 7.x).
 	// pasting through the clipboard would append, but it clobbers the user's clipboard
-	// and android 13's "copied" overlay breaks page source (hidden api mSealed error).
+	// (and on uia2 7.x android 13's "copied" overlay broke page source with an mSealed error).
 	public async setFocusedText(text: string): Promise<boolean> {
 		const done = await this.withSession(async sessionId => {
 			const element = await this.request("POST", `/session/${sessionId}/element`, {

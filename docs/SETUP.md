@@ -30,13 +30,13 @@ Android không cho cài CA người dùng hay cấp quyền VPN qua adb khi khô
 | Bước | Chi tiết |
 |---|---|
 | `host` | `brew install --cask android-platform-tools mitmproxy`, `npm ci --ignore-scripts`, build `lib/`. OCR dùng `swiftc` nếu có (Xcode command line tools). |
-| UiAutomator2 server 7.0.22 | 2 APK chính thức của Appium: đọc màn hình ~0,4 s thay vì ~2,7 s, gõ được tiếng Việt. |
+| UiAutomator2 server 10.6.6 | 2 APK chính thức của Appium: đọc màn hình ~0,2 s thay vì ~2,7 s, gõ được tiếng Việt. |
 | PCAPdroid 2.0.2 (F-Droid) | Bắt traffic theo từng app qua VPN cục bộ, không root. Cấp quyền thông báo, tạo api key, chấp nhận quyền VPN lần đầu. |
 | CA mitmproxy | Đẩy file chứng chỉ lên máy; cài là việc làm tay. |
 | `register` | `claude mcp add -s user mobile-lite -- node lib/index.js`. Server tự đọc api key từ `~/.config/mobile-mcp-lite/keys.env`, nên thêm máy mới không cần đăng ký lại. |
 
 **An toàn chuỗi cung ứng:** mọi APK được ghim SHA-256 trong `scripts/setup.sh`; file tải về khác hash thì script dừng, không cài.
-- UiAutomator2: trùng từng byte với release [v7.0.22](https://github.com/appium/appium-uiautomator2-server/releases/tag/v7.0.22).
+- UiAutomator2: APK của release [v10.6.6](https://github.com/appium/appium-uiautomator2-server/releases/tag/v10.6.6) trùng từng byte với APK trong gói npm `appium-uiautomator2-server@10.6.6` (có SLSA provenance).
 - PCAPdroid: bản F-Droid tự build từ mã nguồn; `classes*.dex` trùng với bản tác giả ký trên GitHub (thư viện `.so` khác do build lại).
 
 **Nơi lưu bí mật:** api key PCAPdroid chỉ ở `~/.config/mobile-mcp-lite/keys.env` (quyền 600; đổi đường dẫn bằng `MOBILEMCP_KEYS_FILE`). Khoá riêng của CA mitmproxy ở `~/.mitmproxy/`: ai có file này đọc được HTTPS của các app tin CA người dùng trên máy đã cài CA, nên chỉ cài CA trên máy test.
@@ -81,8 +81,9 @@ Luôn `net stop` khi xong. Server cũng tự gỡ proxy khi thoát.
 | Điện thoại mất internet sau khi dùng `net` | Proxy bị treo do server bị kill cứng. Lần tới server chạm vào máy sẽ tự gỡ; gỡ ngay: `adb shell settings put global http_proxy :0` |
 | Biểu tượng VPN còn hiện | Mở PCAPdroid bấm Stop, hoặc `scripts/setup.sh verify` để xem trạng thái. |
 | Đọc màn hình chậm ~2,7 s | UiAutomator2 server chưa cài hoặc đang tạm tắt 60 s sau lỗi; chạy lại `scripts/setup.sh device`. |
+| Thiếu một view không có nhãn (vd. RecyclerView trống) | Server bật `ignoreUnimportantViews` cho nhanh; đặt `MOBILEMCP_ALL_VIEWS=1` để lấy đủ. |
 | `net start {app}` vẫn hỏi Allow trên máy | Thiếu api key cho serial đó trong `keys.env`: chạy lại `scripts/setup.sh device <serial>`. |
-| Màn hình Android 13 có lớp phủ "đã sao chép" không đọc được | Lỗi `mSealed` của UiAutomator2; server tự chuyển sang `uiautomator dump` trong 60 s. |
+| Đọc màn hình lỗi liên tục trên một màn | Server tự chuyển sang `uiautomator dump` trong 60 s. Bản UiAutomator2 7.x lỗi `mSealed` với lớp phủ "đã sao chép" của Android 13; 10.6.6 đã hết. |
 
 ## Gỡ bỏ
 

@@ -11,7 +11,7 @@ Token-lean MCP server for driving a real Android device over `adb`. Fork of
 | Settings screen read | ~2,300 tokens | ~95 tokens |
 | Action then observe | 2 calls | 1 call (actions return the new screen, or `unchanged`) |
 | Accessibility tree empty (games, canvas) | screenshot (~600+ image tokens) | Apple Vision OCR on macOS (~80 tokens) |
-| Screen read latency (ZTE Blade A54) | — | ~0.4 s with UiAutomator2 server, ~2.7 s with plain `uiautomator dump` |
+| Screen read latency (ZTE Blade A54) | 1.2–1.3 s | ~0.2 s with UiAutomator2 server 10.6.6, ~2.7 s with plain `uiautomator dump` |
 | Unicode / Vietnamese typing | needs DeviceKit app | UiAutomator2 `setText` |
 | Native binary | `mobilecli` (FSL-1.1, closed build) | none, plain `adb` |
 | Telemetry | PostHog + Scarf | none |
@@ -90,7 +90,8 @@ Needs `adb` on PATH (or `ANDROID_HOME`). OCR needs macOS with Xcode command line
 ## Fast mode: Appium UiAutomator2 server (optional)
 
 If `io.appium.uiautomator2.server` and `io.appium.uiautomator2.server.test` are installed, the server keeps
-UiAutomation alive on the device: screen reads drop to ~0.4 s and `type` accepts any Unicode text.
+UiAutomation alive on the device: screen reads drop to ~0.2 s (with `ignoreUnimportantViews`; `MOBILEMCP_ALL_VIEWS=1`
+keeps every view) and `type` accepts any Unicode text. Tested with 10.6.6.
 Install the official APKs from [appium-uiautomator2-server releases](https://github.com/appium/appium-uiautomator2-server/releases)
 and check their SHA-256 against the release before `adb install`.
 
@@ -98,8 +99,6 @@ and check their SHA-256 against the release before `adb install`.
   can reach it on `localhost:6790`.
 - If page source keeps failing on a screen, it falls back to `uiautomator dump` for 60 s.
 - `MOBILEMCP_DISABLE_UIA2=1` turns it off.
-- `hidden_api_policy` is left untouched, so a few screens (e.g. Android 13's clipboard overlay) cannot be read
-  through it and use the fallback.
 
 ## Known limits
 

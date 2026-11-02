@@ -7,7 +7,8 @@
 #   scripts/setup.sh verify [serial]      check everything on a device
 #   scripts/setup.sh clean [serial]       remove what `device` installed (the user CA is removed by hand)
 #
-# Every APK is pinned to the SHA-256 that was checked against its official release.
+# Every APK is pinned to the SHA-256 that was checked against its official release
+# (UiAutomator2: GitHub release == npm package apks, the npm package has SLSA provenance).
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -16,12 +17,12 @@ CACHE="$HOME/Library/Caches/mobile-mcp-lite/apk"
 CONFIG="$HOME/.config/mobile-mcp-lite"
 KEYS="$CONFIG/keys.env"
 
-UIA2_VERSION="7.0.22"
+UIA2_VERSION="10.6.6"
 UIA2_URL="https://github.com/appium/appium-uiautomator2-server/releases/download/v$UIA2_VERSION"
 UIA2_SERVER_APK="appium-uiautomator2-server-v$UIA2_VERSION.apk"
-UIA2_SERVER_SHA="6ced3199578dea5cf4bd3c06fba79d718ec901c80f988ab8d33190446bda43c2"
+UIA2_SERVER_SHA="8ff760a2a86b487f53090fbdcd5b0360e67d02bb811887d527a9557b0d59c80d"
 UIA2_TEST_APK="appium-uiautomator2-server-debug-androidTest.apk"
-UIA2_TEST_SHA="1a23b0b9b556210cd9c00c4840d98ddd335520a9995345e530ecdb2e58ebef9d"
+UIA2_TEST_SHA="e6f729287d72351388fd66597c35b69988b9091a7011954bf92a55d416cb1e1c"
 
 # F-Droid build of PCAPdroid 2.0.2 (its dex matches the developer's GitHub release)
 PCAPDROID_PKG="com.emanuelef.remote_capture"
