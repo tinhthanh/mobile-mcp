@@ -7,12 +7,15 @@ trimmed to Android only. No root needed.
 ## Quick start (macOS)
 
 ```bash
-git clone https://github.com/tinhthanh/mobile-mcp.git && cd mobile-mcp
-scripts/setup.sh host        # adb, mitmproxy, build
-scripts/setup.sh device      # per phone: UiAutomator2 server, PCAPdroid, api key (USB debugging must be authorized)
-scripts/setup.sh register    # once per Mac: MCP "mobile-lite" + android-tester subagent in Claude Code
-scripts/setup.sh verify
+git clone https://github.com/tinhthanh/mobile-mcp.git && mobile-mcp/scripts/setup.sh
 ```
+
+One command, safe to re-run (~6 s when nothing changed): installs adb and Node if missing, builds, waits for a phone
+(telling you to enable USB debugging or tap *Allow* if needed), installs the pinned UiAutomator2 server on every
+connected phone and checks it reads the screen, then registers the `mobile-lite` MCP server, the `android-tester`
+subagent and (after asking) the `mcp__mobile-lite` permission in Claude Code. Add `--net` for network capture
+(mitmproxy, PCAPdroid, its api key and VPN consent, all automatic), `--with-ca` to push the mitmproxy CA,
+`--serial <id>` for one phone, `--yes` to skip the question. `scripts/setup.sh verify` checks a phone.
 
 Then, in a new Claude Code session: *"Use android-tester to check that Settings > Display shows Dark mode"*.
 Manual steps, troubleshooting and cleanup: [docs/SETUP.md](docs/SETUP.md) (Vietnamese).
@@ -126,7 +129,7 @@ Needs `adb` on PATH (or `ANDROID_HOME`); OCR needs Xcode command line tools (`na
 ## UiAutomator2 server
 
 With `io.appium.uiautomator2.server` (+ `.test`) installed, the server keeps UiAutomation alive on the device: screen
-reads take ~0.2 s instead of ~2.7 s for `uiautomator dump`, and `type` accepts any Unicode text. `scripts/setup.sh device`
+reads take ~0.2 s instead of ~2.7 s for `uiautomator dump`, and `type` accepts any Unicode text. `scripts/setup.sh`
 installs 10.6.6 with pinned hashes.
 
 - Started on first use, stopped after 5 idle minutes and on exit. While it runs, any app on the device can reach it
@@ -138,7 +141,7 @@ installs 10.6.6 with pinned hashes.
 - `type` replaces the field with the UiAutomator2 server, but appends (ASCII only) without it.
 - `net list` in PCAPdroid mode returns the whole summary each time, not only new hosts.
 - OCR can still read some icons as short words.
-- The api key step of `scripts/setup.sh device` relies on PCAPdroid's English UI; other languages need the manual step.
+- The api key step of `scripts/setup.sh --net` relies on PCAPdroid's English UI; other languages need the manual step.
 
 ## License
 

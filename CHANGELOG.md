@@ -14,8 +14,9 @@ Android-only rewrite of mobile-mcp 1.0.15 for token-lean agent use.
 * Network: `net` captures through mitmproxy over USB (selective HTTPS decryption, redacted `show`) or PCAPdroid per
   app; stale proxies are cleared automatically.
 * Agent: `android-tester` subagent and `scripts/run-test.sh`.
-* Setup: `scripts/setup.sh host|device|register|verify|clean` with pinned APK hashes; Vietnamese guide in
-  `docs/SETUP.md`.
+* Setup: one idempotent `scripts/setup.sh` (waits for the phone with instructions, every connected phone,
+  functional UiAutomator2 check, Claude Code registration and permission, `--net`/`--with-ca` opt-in) with pinned
+  APK hashes; `verify` and `clean` subcommands; Vietnamese guide in `docs/SETUP.md`.
 * Removed: iOS, simulators, cloud devices, recording, logs/crashes, install/uninstall, `open_url`, orientation,
   PostHog/Scarf telemetry, the `mobilecli`/`mobilewright` dependency (FSL-1.1 binary), the install helper and plugin.
 
