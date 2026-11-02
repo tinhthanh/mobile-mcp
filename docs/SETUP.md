@@ -22,12 +22,14 @@ chạy Sonnet, có sẵn quy tắc an toàn (không gửi tin, gọi điện, th
 và báo cáo dạng PASS/FAIL kèm dòng màn hình làm bằng chứng.
 
 - Trong Claude Code: *"Dùng android-tester kiểm tra luồng đăng nhập của app com.example: …"* — agent chính giao việc, chỉ nhận lại báo cáo.
-- Chạy riêng, rẻ nhất (cho CI hoặc script):
-  ```bash
-  claude -p "Smoke test: mở Cài đặt, vào Display, Dark mode đang On hay Off?" \
-    --agent android-tester --allowedTools "mcp__mobile-lite__*"
-  ```
-  Đo trên ZTE Blade A54: smoke test 3 phần (UI, gõ tiếng Việt, network Zalo) mất 9 lượt, 39 s, ~$0,04.
+- Chạy riêng, rẻ nhất (cho CI hoặc script): `scripts/run-test.sh "Mở Cài đặt, vào Display: Dark mode đang On hay Off?"`.
+  Dùng prompt của agent làm toàn bộ system prompt, không tool có sẵn, chỉ MCP mobile-lite; in báo cáo và một dòng
+  `[lượt, giây, $]`, exit 1 nếu không PASS. `MODEL=haiku` để rẻ hơn, `STREAM=run.jsonl` để giữ transcript.
+  Đo trên ZTE Blade A54, smoke test 3 phần (UI, gõ tiếng Việt, network Zalo): 7 lượt, 38 s, $0,037
+  (`claude -p --agent android-tester`: 9 lượt, $0,042).
+- Gọi qua phiên Claude Code chính không bị hỏi quyền từng thao tác nếu `~/.claude/settings.json` có
+  `"permissions": {"allow": ["mcp__mobile-lite"]}`. Subagent rẻ ($0,019 cho một kiểm tra) nhưng phiên chính (Opus) vẫn
+  tốn phần lớn ($0,17), vì nó mang system prompt đầy đủ.
 
 ## Việc phải làm tay
 

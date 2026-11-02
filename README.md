@@ -74,7 +74,8 @@ tls (not decrypted): www.google.com, api.example.com×3
 
 ## Setting up a new device
 
-`scripts/setup.sh host | device | register | verify | clean` installs and checks everything (pinned APK hashes);
+`scripts/setup.sh host | device | register | verify | clean` installs and checks everything (pinned APK hashes) and
+links the `android-tester` subagent; `scripts/run-test.sh "<task>"` runs it headless with the leanest context;
 see [docs/SETUP.md](docs/SETUP.md) (Vietnamese) for the manual steps and troubleshooting.
 
 ## Install (Claude Code)
