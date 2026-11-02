@@ -34,6 +34,17 @@ test.describe("compact screen", () => {
 		]);
 	});
 
+	test("reads appium page source, where tags are class names", async () => {
+		const xml = `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy index="0" class="hierarchy" rotation="0" width="720" height="1522">` +
+			`<android.widget.FrameLayout package="com.example" bounds="[0,0][720,1600]" displayed="true">` +
+			`<android.widget.LinearLayout clickable="true" bounds="[0,0][720,100]" displayed="true">` +
+			`<android.widget.TextView text="Hiển thị" bounds="[0,0][300,100]" displayed="true"/>` +
+			`</android.widget.LinearLayout>` +
+			`<android.widget.TextView text="hidden" bounds="[0,100][300,200]" displayed="false"/>` +
+			`</android.widget.FrameLayout></hierarchy>`;
+		expect(compactScreen(xml)).toEqual({ app: "com.example", lines: ["*Hiển thị|360,50"] });
+	});
+
 	test("skips zero-size and offscreen nodes", async () => {
 		const xml = dump(
 			node(`text="gone" bounds="[0,0][0,0]"`) +

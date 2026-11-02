@@ -17,6 +17,8 @@ interface UiNode {
 	selected?: string;
 	enabled?: string;
 	focused?: string;
+	// appium page source only
+	displayed?: string;
 }
 
 interface Rect {
@@ -95,9 +97,13 @@ export interface CompactScreen {
 	lines: string[];
 }
 
+// appium's page source names each element after its class (<android.widget.TextView ...>)
+// where uiautomator dump uses <node ...>; the attributes are the same
+const normalizeTags = (dump: string): string => dump.replace(/<(\/?)(?!hierarchy[\s>])([A-Za-z_][\w.$]*)(?=[\s/>])/g, "<$1node");
+
 export const compactScreen = (dump: string): CompactScreen => {
 	const parser = new xml.XMLParser({ ignoreAttributes: false, attributeNamePrefix: "", parseAttributeValue: false });
-	const parsed = parser.parse(dump.substring(dump.indexOf("<?xml")));
+	const parsed = parser.parse(normalizeTags(dump.substring(dump.indexOf("<?xml"))));
 	const roots = children(parsed.hierarchy || {});
 	const screen = roots.map(r => parseBounds(r.bounds)).find(r => r !== null) || null;
 
@@ -142,7 +148,7 @@ export const compactScreen = (dump: string): CompactScreen => {
 
 	const walk = (node: UiNode) => {
 		const r = parseBounds(node.bounds);
-		if (r && visible(r)) {
+		if (r && visible(r) && node.displayed !== "false") {
 			if (isTappable(node) || isInput(node)) {
 				const texts: string[] = [];
 				const own = ownLabel(node);

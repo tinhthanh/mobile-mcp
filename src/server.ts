@@ -11,6 +11,7 @@ import { ActionableError, Button } from "./robot";
 import { compactScreen, SCREEN_LEGEND } from "./screen";
 import { ocrLines } from "./ocr";
 import { validatePackageName } from "./utils";
+import { Uia2Client } from "./uia2";
 
 // below this many lines the accessibility tree is probably useless (game, canvas, flutter)
 const OCR_FALLBACK_MIN_LINES = 3;
@@ -64,6 +65,42 @@ const shrinkToJpeg = (png: Buffer): { data: Buffer, mimeType: string } => {
 	}
 };
 
+// module level: the http transport builds a server per request, devices outlive that
+const robots = new Map<string, AndroidRobot>();
+const uia2Clients = new Map<string, Uia2Client | null>();
+const lastScreen = new Map<string, string>();
+
+process.on("exit", () => {
+	for (const client of uia2Clients.values()) {
+		client?.stop();
+	}
+});
+
+const getRobot = (deviceId: string): AndroidRobot => {
+	let robot = robots.get(deviceId);
+	if (!robot) {
+		const devices = new AndroidDeviceManager().getConnectedDevices();
+		if (!devices.find(d => d.deviceId === deviceId)) {
+			throw new ActionableError(`Device "${deviceId}" not found. Use the devices tool to see available devices`);
+		}
+
+		robot = new AndroidRobot(deviceId);
+		robots.set(deviceId, robot);
+	}
+
+	return robot;
+};
+
+const getUia2 = (deviceId: string): Uia2Client | null => {
+	if (!uia2Clients.has(deviceId)) {
+		const robot = getRobot(deviceId);
+		const usable = !process.env.MOBILEMCP_DISABLE_UIA2 && Uia2Client.isInstalled(robot);
+		uia2Clients.set(deviceId, usable ? new Uia2Client(robot, deviceId) : null);
+	}
+
+	return uia2Clients.get(deviceId)!;
+};
+
 export const createMcpServer = (): McpServer => {
 
 	const server = new McpServer({
@@ -108,39 +145,22 @@ export const createMcpServer = (): McpServer => {
 		}) as any);
 	};
 
-	const robots = new Map<string, AndroidRobot>();
-	const lastScreen = new Map<string, string>();
-
-	const getRobot = (deviceId: string): AndroidRobot => {
-		let robot = robots.get(deviceId);
-		if (!robot) {
-			const devices = new AndroidDeviceManager().getConnectedDevices();
-			if (!devices.find(d => d.deviceId === deviceId)) {
-				throw new ActionableError(`Device "${deviceId}" not found. Use the devices tool to see available devices`);
-			}
-
-			robot = new AndroidRobot(deviceId);
-			robots.set(deviceId, robot);
-		}
-
-		return robot;
-	};
-
 	const readScreen = async (deviceId: string, forceOcr: boolean): Promise<string> => {
 		const robot = getRobot(deviceId);
-		const { app, lines } = compactScreen(await robot.getUiAutomatorDump());
+		const source = await getUia2(deviceId)?.getSource() ?? await robot.getUiAutomatorDump();
+		const { app, lines } = compactScreen(source);
 
 		let body = lines;
-		let source = "";
+		let via = "";
 		if (forceOcr || lines.length < OCR_FALLBACK_MIN_LINES) {
 			const ocr = ocrLines(await robot.getScreenshot());
 			if (ocr !== null) {
 				body = forceOcr ? ocr : [...lines, ...ocr];
-				source = " (ocr)";
+				via = " (ocr)";
 			}
 		}
 
-		const text = [`app=${app}${source}`, ...body].join("\n");
+		const text = [`app=${app}${via}`, ...body].join("\n");
 		if (lastScreen.get(deviceId) === text) {
 			return "unchanged";
 		}
@@ -218,7 +238,7 @@ export const createMcpServer = (): McpServer => {
 
 	tool(
 		"type",
-		"Type text into the focused input (tap it first). submit=true presses ENTER after.",
+		"Set the focused input's text (replaces it, unicode ok). Tap the input first. submit=true presses ENTER after.",
 		{
 			device,
 			text: z.string(),
@@ -228,7 +248,12 @@ export const createMcpServer = (): McpServer => {
 		{ destructiveHint: true },
 		async ({ device, text, submit, observe }) => {
 			const robot = getRobot(device);
-			await robot.sendKeys(text);
+			// uia2 setText handles unicode and replaces the field; adb `input text` is ascii only and appends
+			const typed = await getUia2(device)?.setFocusedText(text);
+			if (!typed) {
+				await robot.sendKeys(text);
+			}
+
 			if (submit) {
 				await robot.pressButton("ENTER");
 			}
