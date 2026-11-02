@@ -1,11 +1,10 @@
 {
-  "name": "@mobilenext/mobile-mcp",
-  "mcpName": "io.github.mobile-next/mobile-mcp",
-  "version": "0.0.1",
-  "description": "Mobile MCP",
+  "name": "mobile-mcp-lite",
+  "version": "0.1.0",
+  "description": "Token-lean Android MCP server over adb, fork of mobile-next/mobile-mcp",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mobile-next/mobile-mcp.git"
+    "url": "git+https://github.com/tinhthanh/mobile-mcp.git"
   },
   "engines": {
     "node": ">=20"
@@ -22,22 +21,19 @@
     "prepare": "husky"
   },
   "files": [
-    "lib"
+    "lib",
+    "native"
   ],
   "dependencies": {
-    "@clack/prompts": "^0.9.1",
     "@modelcontextprotocol/express": "2.0.2",
     "@modelcontextprotocol/node": "^2.1.2",
     "@modelcontextprotocol/server": "2.4.0",
-    "add-mcp": "^2.6.0",
     "ajv": "^8.18.0",
     "commander": "14.0.0",
     "express": "5.1.0",
     "fast-xml-parser": "5.8.0",
-    "mobilewright": "0.0.68",
     "qs": "^6.15.0",
-    "zod": "^4.2.0",
-    "zod-to-json-schema": "3.25.0"
+    "zod": "^4.2.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
@@ -61,14 +57,15 @@
   },
   "main": "index.js",
   "bin": {
-    "mcp-server-mobile": "lib/index.js"
+    "mobile-mcp-lite": "lib/index.js"
   },
   "directories": {
     "lib": "lib"
   },
   "author": "",
   "bugs": {
-    "url": "https://github.com/mobile-next/mobile-mcp/issues"
+    "url": "https://github.com/tinhthanh/mobile-mcp/issues"
   },
-  "homepage": "https://github.com/mobile-next/mobile-mcp#readme"
+  "homepage": "https://github.com/tinhthanh/mobile-mcp#readme",
+  "private": true
 }

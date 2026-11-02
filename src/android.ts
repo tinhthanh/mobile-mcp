@@ -483,14 +483,17 @@ export class AndroidRobot implements Robot {
 		return rotation === "0" ? "portrait" : "landscape";
 	}
 
-	private async getUiAutomatorDump(): Promise<string> {
+	public async getUiAutomatorDump(): Promise<string> {
 		for (let tries = 0; tries < 10; tries++) {
-			const dump = this.adb("exec-out", "uiautomator", "dump", "/dev/tty").toString();
-			// note: we're not catching other errors here. maybe we should check for <?xml
-			if (dump.includes("null root node returned by UiTestAutomationBridge")) {
-				// uncomment for debugging
-				// const screenshot = await this.getScreenshot();
-				// console.error("Failed to get UIAutomator XML. Here's a screenshot: " + screenshot.toString("base64"));
+			let dump = this.adb("exec-out", "uiautomator", "dump", "/dev/tty").toString();
+			if (!dump.includes("<?xml") && !dump.includes("null root node")) {
+				// some vendor builds (e.g. ZTE) print nothing to /dev/tty, go through a file instead
+				this.silentAdb("shell", "uiautomator", "dump", "/data/local/tmp/ui.xml");
+				dump = this.adb("exec-out", "cat", "/data/local/tmp/ui.xml").toString();
+			}
+
+			if (!dump.includes("<?xml")) {
+				// "null root node returned by UiTestAutomationBridge" while the ui is still settling
 				continue;
 			}
 
