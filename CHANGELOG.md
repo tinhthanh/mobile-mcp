@@ -17,6 +17,9 @@ Android-only rewrite of mobile-mcp 1.0.15 for token-lean agent use.
 * Setup: one idempotent `scripts/setup.sh` (waits for the phone with instructions, every connected phone,
   functional UiAutomator2 check, Claude Code registration and permission, `--net`/`--with-ca` opt-in) with pinned
   APK hashes; `verify` and `clean` subcommands; Vietnamese guide in `docs/SETUP.md`.
+* Mirror: `scripts/setup.sh mirror` shows and controls the phone on the Mac over USB with scrcpy; `mirror install`
+  opens it by itself whenever a phone is plugged in (launchd agent), and a window closed by hand stays closed until
+  the next plug-in.
 * Removed: iOS, simulators, cloud devices, recording, logs/crashes, install/uninstall, `open_url`, orientation,
   PostHog/Scarf telemetry, the `mobilecli`/`mobilewright` dependency (FSL-1.1 binary), the install helper and plugin.
 

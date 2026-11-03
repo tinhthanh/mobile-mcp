@@ -14,12 +14,14 @@
 #   scripts/setup.sh register        Claude Code registration only
 #   scripts/setup.sh verify [serial] check a phone
 #   scripts/setup.sh clean [serial]  remove what setup installed on a phone (the user CA by hand)
+#   scripts/setup.sh mirror [...]    phone screen and control on the Mac over USB (scrcpy); see scripts/mirror.sh
 #
 # Every APK is pinned to the SHA-256 that was checked against its official release
 # (UiAutomator2: GitHub release == npm package apks, the npm package has SLSA provenance).
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+[ "${1:-}" = mirror ] && { shift; exec "$REPO/scripts/mirror.sh" "$@"; }
 UI="node $REPO/scripts/device-ui.cjs"
 CACHE="$HOME/Library/Caches/mobile-mcp-lite/apk"
 CONFIG="$HOME/.config/mobile-mcp-lite"
@@ -428,7 +430,7 @@ while [ $# -gt 0 ]; do
 		--yes|-y) YES=1 ;;
 		--no-register) REGISTER="" ;;
 		--serial) SERIAL="${2:?--serial cần giá trị}"; shift ;;
-		-h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,21p' "$0"; exit 0 ;;
 		host|device|register|verify|clean|up) CMD="$1" ;;
 		-*) fail "Không biết tuỳ chọn $1 (xem --help)" ;;
 		*) POSITIONAL+=("$1") ;;

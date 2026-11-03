@@ -16,6 +16,8 @@ connected phone and checks it reads the screen, then registers the `mobile-lite`
 subagent and (after asking) the `mcp__mobile-lite` permission in Claude Code. Add `--net` for network capture
 (mitmproxy, PCAPdroid, its api key and VPN consent, all automatic), `--with-ca` to push the mitmproxy CA,
 `--serial <id>` for one phone, `--yes` to skip the question. `scripts/setup.sh verify` checks a phone.
+`scripts/setup.sh mirror install` shows the phone's screen on the Mac with mouse and keyboard control (scrcpy over
+USB) whenever it is plugged in: no consent dialog, no accessibility service, nothing reachable over Wi‑Fi.
 
 Then, in a new Claude Code session: *"Use android-tester to check that Settings > Display shows Dark mode"*.
 Manual steps, troubleshooting and cleanup: [docs/SETUP.md](docs/SETUP.md) (Vietnamese).

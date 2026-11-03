@@ -31,7 +31,23 @@ Lệnh này làm hết, chạy lại bao nhiêu lần cũng được (bước n�
 Đo trên ZTE Blade A54 đã gỡ sạch: `scripts/setup.sh --net` mất 2 phút 36 giây (gồm tải APK), không phải chạm vào máy.
 Không `--net`, máy đã có UiAutomator2: 27 giây (gồm build).
 
-Lệnh lẻ vẫn còn: `host` (chỉ Mac), `device [serial]` (một máy, nhận `--net`/`--with-ca`), `register`, `verify [serial]`, `clean [serial]`.
+Lệnh lẻ vẫn còn: `host` (chỉ Mac), `device [serial]` (một máy, nhận `--net`/`--with-ca`), `register`, `verify [serial]`, `clean [serial]`, `mirror` (xem dưới).
+
+## Xem và điều khiển điện thoại trên Mac (cắm cáp là dùng)
+
+```bash
+scripts/setup.sh mirror install   # từ nay cứ cắm điện thoại là màn hình tự mở trên Mac
+scripts/setup.sh mirror           # mở ngay một lần (chờ điện thoại nếu chưa cắm)
+scripts/setup.sh mirror status    # đang bật không, cửa sổ nào đang mở
+scripts/setup.sh mirror uninstall # tắt tự mở
+```
+
+Dùng [scrcpy](https://github.com/Genymobile/scrcpy) (Apache-2.0, cài qua Homebrew; gói đã đối chiếu SHA-256 với bản
+phát hành gốc). Nó chạy bằng quyền adb shell nên **không có hộp thoại "Bắt đầu ghi/truyền"** và **không cần bật
+Trợ năng**: chuột và bàn phím Mac điều khiển điện thoại luôn, máy khoá thì gõ PIN ngay trong cửa sổ. Việc duy nhất
+trên điện thoại là cho phép gỡ lỗi USB với *Luôn cho phép từ máy tính này*, một lần. Khi đang mở, điện thoại giữ
+sáng màn hình; rút cáp là hết. Đóng cửa sổ bằng tay thì nó không tự mở lại cho tới lần cắm sau.
+Chỉ máy đang cắm cáp và đã được tin cậy mới xem được, không có gì mở qua Wi‑Fi. Log: `~/Library/Logs/mobile-mcp-lite/mirror.log`.
 
 Sau đó mở phiên Claude Code mới và giao việc, ví dụ: *"Dùng android-tester mở Cài đặt và cho biết Dark mode đang bật hay tắt"*.
 
@@ -129,7 +145,7 @@ Luôn `net stop` khi xong. Server cũng tự gỡ proxy khi thoát.
 scripts/setup.sh clean [serial]   # gỡ UiAutomator2, PCAPdroid, proxy, file CA đã đẩy, xoá key của máy
 ```
 CA người dùng phải gỡ tay: *Thông tin xác thực đáng tin cậy > Người dùng > mitmproxy > Xoá*.
-Gỡ MCP: `claude mcp remove mobile-lite -s user`.
+Gỡ MCP: `claude mcp remove mobile-lite -s user`. Tắt tự mở màn hình: `scripts/setup.sh mirror uninstall`.
 
 ## Nâng phiên bản APK
 
