@@ -1,51 +1,25 @@
-# Contributing to mobile-mcp-lite
+# Contributing
 
-Thanks for your interest in contributing! This document covers the basics for getting set up and submitting changes.
+## Build and test
 
-## Code of Conduct
-
-This project adheres to the [Contributor Covenant](CODE_OF_CONDUCT.md). By participating, you agree to keep the community welcoming and respectful.
-
-## Reporting bugs and requesting features
-
-- Search [existing issues](https://github.com/tinhthanh/mobile-mcp/issues) before opening a new one.
-- Open one issue per bug or feature request.
-- For bugs, include: mobile-mcp-lite version, phone model and Android version, whether the UiAutomator2 server is installed, the tool call and its output (trim personal data), and the actual vs. expected behavior.
-- For larger feature proposals, please open an issue to discuss the design before sending a PR.
-
-## Reporting security issues
-
-Please **do not** file public GitHub issues for security vulnerabilities — see [SECURITY.md](SECURITY.md) for the private reporting process.
-
-## Development setup
-
-Requirements: Node.js 22+, python3, Android Platform Tools and a USB-connected Android phone for end-to-end checks. See [docs/SETUP.md](docs/SETUP.md).
+berth-mobile is a Rust crate in `berth-mobile/` (stable Rust, Xcode command line tools for the OCR helper):
 
 ```bash
-git clone https://github.com/tinhthanh/mobile-mcp.git
-cd mobile-mcp
-npm ci --ignore-scripts
-npm run build
-
-# lint
-npm run lint
-
-# unit tests (no device needed; Playwright is only the runner)
-npm test
-
-# end-to-end on a connected phone
-scripts/run-test.sh "Mở Cài đặt, vào Display: Dark mode đang On hay Off?"
+cd berth-mobile
+cargo build --release
+cargo clippy --all-targets -- -D warnings
+cargo test
 ```
 
-`npm run watch` recompiles on change during development. A pre-commit hook (husky) runs `npm run lint` automatically.
+`scripts/package.sh` builds the universal plugin (needs the `x86_64-apple-darwin` target);
+`scripts/package.sh --install` copies it into `~/.berth/plugins/mobile` for a local Shipyard.
 
-## Submitting changes
+Try a change against a phone through MCP without Shipyard: `target/release/berth-mobile mcp` speaks MCP on stdio;
+`scripts/run-test.sh "<task>"` (repository root) runs the android-tester agent against it.
 
-- Branch off `main` and open a pull request when ready.
-- Keep PRs focused — one concern per PR.
-- Run `npm run build`, `npm run lint`, and `npm test` locally before pushing.
-- CI (`.github/workflows/build.yml`) runs an npm audit, lint, and build on every PR — make sure it's green.
+## Pull requests
 
-## License
-
-By contributing, you agree that your contributions will be licensed under the [Apache License 2.0](LICENSE).
+- Keep the screen format and tool behaviour stable: agents rely on them. Add a unit test next to the code
+  (`screen.rs`, `screen_ios.rs`, `net.rs` have examples) for parsing changes.
+- New downloads must be pinned by SHA-256 in the binary.
+- CI (`.github/workflows/berth-mobile.yml`) runs clippy and the tests on macOS; tags `mobile-v*` publish a release.

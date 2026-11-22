@@ -24,7 +24,7 @@ ok() { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 fail() { printf '  \033[31m✗\033[0m %s\n' "$*" >&2; exit 1; }
 
 need_tools() {
-	command -v adb >/dev/null || fail "Chưa có adb — chạy scripts/setup.sh host"
+	command -v adb >/dev/null || fail "Chưa có adb — brew install --cask android-platform-tools (hoặc scripts/setup.sh)"
 	if ! command -v scrcpy >/dev/null; then
 		command -v brew >/dev/null || fail "Chưa có scrcpy và Homebrew — cài scrcpy trước"
 		brew install scrcpy

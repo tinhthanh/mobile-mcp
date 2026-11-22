@@ -6,7 +6,7 @@
 //! package, hosts only.
 
 use std::collections::HashMap;
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -72,10 +72,6 @@ fn find_mitmdump() -> Result<PathBuf> {
     c.into_iter().find(|p| p.is_file()).ok_or_else(|| {
         Error::actionable("mitmdump not found. Install mitmproxy (brew install --cask mitmproxy), or use net start {app} (PCAPdroid)")
     })
-}
-
-fn free_port() -> Result<u16> {
-    Ok(TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
 }
 
 fn is_listening(port: u16) -> bool {
@@ -350,7 +346,7 @@ impl NetCapture {
         let dir = self.new_dir()?;
         std::fs::write(dir.join("net_addon.py"), ADDON)?;
         std::fs::write(dir.join("net_redact.py"), REDACT)?;
-        self.port = free_port()?;
+        self.port = crate::util::free_port()?;
         self.cursor = 0;
         let child = Command::new(mitmdump)
             .args([
@@ -591,5 +587,133 @@ impl NetCapture {
         if let Some(d) = self.dir.take() {
             let _ = std::fs::remove_dir_all(d);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let d =
+            std::env::temp_dir().join(format!("berth-mobile-net-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn with_logs(name: &str, summaries: &[Value], details: &[Value]) -> NetCapture {
+        let dir = temp_dir(name);
+        let lines = |v: &[Value]| v.iter().map(|x| x.to_string() + "\n").collect::<String>();
+        std::fs::write(dir.join("log.jsonl"), lines(summaries)).unwrap();
+        std::fs::write(dir.join("detail.jsonl"), lines(details)).unwrap();
+        let mut c = NetCapture::new("SERIAL1");
+        c.dir = Some(dir);
+        c
+    }
+
+    #[test]
+    fn redacts_credentials_in_bodies() {
+        // the python half runs inside mitmdump; check it with any python3 there is
+        let dir = temp_dir("redact");
+        std::fs::write(dir.join("net_redact.py"), REDACT).unwrap();
+        let input = [
+            r#"{"access_token": "abc.def", "user": "an", "password": "p\"q"}"#,
+            r#"{"data": "{\"password\":\"hunter2\"}"}"#,
+            "user=an&refresh_token=zzz&page=2",
+            "Authorization: Bearer eyJhbGciOi.xyz",
+        ]
+        .join("\n");
+        let out = std::process::Command::new("python3")
+            .args(["-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); from net_redact import redact; sys.stdout.write(redact(sys.argv[2]))"])
+            .arg(&dir)
+            .arg(&input)
+            .output();
+        let Ok(out) = out else { return };
+        let out = String::from_utf8_lossy(&out.stdout);
+        for secret in ["abc.def", "p\\\"q", "hunter2", "zzz", "eyJhbGciOi"] {
+            assert!(!out.contains(secret), "{secret} leaked: {out}");
+        }
+        assert!(out.contains(r#""user": "an""#));
+        assert!(out.contains("page=2"));
+    }
+
+    #[test]
+    fn lists_new_requests_groups_tls_and_filters() {
+        let mut c = with_logs(
+            "list",
+            &[
+                serde_json::json!({"id": 1, "t": 0, "m": "GET", "s": 200, "h": "api.example.com", "p": "/v1/users", "r": 1300, "ms": 140, "ct": "application/json"}),
+                serde_json::json!({"id": 2, "t": 0, "tls": true, "h": "cdn.example.com"}),
+                serde_json::json!({"id": 3, "t": 0, "tls": true, "h": "cdn.example.com"}),
+                serde_json::json!({"id": 4, "t": 0, "m": "POST", "s": 0, "h": "api.example.com", "p": "/v1/login", "err": "connection reset"}),
+            ],
+            &[],
+        );
+        assert_eq!(
+            c.list(None, false),
+            "#1 GET 200 api.example.com/v1/users 1.3KB 140ms application/json\n#4 POST ERR api.example.com/v1/login connection reset\ntls (not decrypted): cdn.example.com×2 (capture stopped)"
+        );
+        assert_eq!(c.list(None, false), "no new requests (capture stopped)");
+        let log = c.log_file();
+        let mut text = std::fs::read_to_string(&log).unwrap();
+        text.push_str(&(serde_json::json!({"id": 5, "t": 0, "m": "GET", "s": 304, "h": "img.example.com", "p": "/a.png", "r": 0, "ms": 9}).to_string() + "\n"));
+        std::fs::write(&log, text).unwrap();
+        assert_eq!(
+            c.list(None, false),
+            "#5 GET 304 img.example.com/a.png 0 9ms (capture stopped)"
+        );
+        assert_eq!(
+            c.list(Some("users"), true),
+            "#1 GET 200 api.example.com/v1/users 1.3KB 140ms application/json (capture stopped)"
+        );
+        c.remove_files();
+    }
+
+    #[test]
+    fn show_drops_noise_headers_unless_all() {
+        let mut c = with_logs(
+            "show",
+            &[],
+            &[serde_json::json!({
+                "id": 1,
+                "url": "https://api.example.com/v1/users",
+                "req_headers": {"sec-fetch-mode": "cors", "accept": "*/*", "authorization": "[redacted]"},
+                "req_body": "",
+                "resp_headers": {"content-type": "application/json", "date": "today"},
+                "resp_body": "{}",
+            })],
+        );
+        let short = c.show(1, false).unwrap();
+        assert!(short.contains("authorization: [redacted]"));
+        assert!(short.contains("content-type: application/json"));
+        assert!(!short.contains("sec-fetch-mode"));
+        assert!(!short.contains("date:"));
+        assert!(c.show(1, true).unwrap().contains("sec-fetch-mode: cors"));
+        c.remove_files();
+    }
+
+    #[test]
+    fn api_key_per_device_from_env_then_keys_file() {
+        let dir = temp_dir("keys");
+        let file = dir.join("keys.env");
+        std::fs::write(
+            &file,
+            "# comment\nPCAPDROID_API_KEY_OTHER=nope\nPCAPDROID_API_KEY_ABC_5555=from-file\n",
+        )
+        .unwrap();
+        unsafe { std::env::set_var("MOBILEMCP_KEYS_FILE", &file) };
+        assert_eq!(
+            NetCapture::new("ABC:5555").api_key().as_deref(),
+            Some("from-file")
+        );
+        unsafe { std::env::set_var("PCAPDROID_API_KEY_ABC_5555", "from-env") };
+        assert_eq!(
+            NetCapture::new("ABC:5555").api_key().as_deref(),
+            Some("from-env")
+        );
+        unsafe { std::env::remove_var("PCAPDROID_API_KEY_ABC_5555") };
+        unsafe { std::env::remove_var("MOBILEMCP_KEYS_FILE") };
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

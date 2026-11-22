@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Run one android-tester task headless with the leanest context: the agent's prompt as the whole
-# system prompt, no built-in tools and only the mobile-lite MCP server (~3.5k tokens per turn
-# instead of ~6.5k with `claude -p --agent android-tester`).
+# system prompt, no built-in tools and only the berth-mobile MCP server (~3.5k tokens per turn
+# instead of ~6.5k with `claude -p --agent android-tester`). Uses Shipyard's "mobile" plugin
+# through berthd when it is installed, else berth-mobile built in this repository.
 #
 #   scripts/run-test.sh "Mở Cài đặt, vào Display: Dark mode đang On hay Off?"
 #   MODEL=haiku scripts/run-test.sh "..."      # default sonnet
@@ -16,21 +17,30 @@ AGENT="$REPO/.claude/agents/android-tester.md"
 TASK="${1:?usage: scripts/run-test.sh \"<task>\"}"
 
 command -v claude >/dev/null || { echo "claude CLI not found" >&2; exit 2; }
-[ -f "$REPO/lib/index.js" ] || { echo "run scripts/setup.sh host first" >&2; exit 2; }
+BERTHD="$(command -v berthd || echo "$HOME/.local/bin/berthd")"
+LOCAL="$REPO/berth-mobile/target/release/berth-mobile"
+if [ -x "$BERTHD" ] && [ -f "$HOME/.berth/plugins/mobile/berth-plugin.json" ]; then
+	SERVER=$(printf '{"command":"%s","args":["plugin-mcp","mobile","mobile"]}' "$BERTHD")
+elif [ -x "$LOCAL" ]; then
+	SERVER=$(printf '{"command":"%s","args":["mcp"]}' "$LOCAL")
+else
+	echo "no berth-mobile: install Shipyard's mobile plugin, or run scripts/setup.sh" >&2
+	exit 2
+fi
 
 # the agent body without its frontmatter
 PROMPT=$(awk 'f > 1 { print } /^---$/ { f++ }' "$AGENT")
 
 WORK=$(mktemp -d)
 trap 'rm -rf "${WORK:?}"' EXIT
-printf '{"mcpServers":{"mobile-lite":{"command":"node","args":["%s/lib/index.js"]}}}' "$REPO" > "$WORK/mcp.json"
+printf '{"mcpServers":{"berth-mobile":%s}}' "$SERVER" > "$WORK/mcp.json"
 
 claude -p "$TASK" \
 	--model "${MODEL:-sonnet}" \
 	--system-prompt "$PROMPT" \
 	--tools "" \
 	--strict-mcp-config --mcp-config "$WORK/mcp.json" \
-	--allowedTools "mcp__mobile-lite__*" \
+	--allowedTools "mcp__berth-mobile__*" \
 	--output-format stream-json --verbose < /dev/null > "$WORK/run.jsonl"
 
 [ -n "${STREAM:-}" ] && cp "$WORK/run.jsonl" "$STREAM"

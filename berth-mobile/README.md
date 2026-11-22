@@ -4,7 +4,7 @@ The mobile-mcp-lite tools (`devices`, `screen`, `tap`, `type`, `swipe`, `key`,
 `app`, `wait`, `steps`, `net`) rewritten in Rust as one ~4.5 MB universal
 macOS binary, packaged as a Shipyard plugin. Agents on a box get an MCP server
 `berth-mobile` and a skill `berth-mobile`; the screen format and tool behaviour
-are the same as the Node server's.
+are those of the retired Node server, plus iPhones.
 
 ## Install
 

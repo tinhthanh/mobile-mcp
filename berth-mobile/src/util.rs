@@ -153,3 +153,90 @@ pub fn truncate(s: &str, max: usize) -> String {
     t.push('…');
     t
 }
+
+/// Whether a process runs. A child this process started and that exited is
+/// a zombie until reaped, which kill(pid, 0) would still call alive.
+pub fn alive(pid: i32) -> bool {
+    let mut status = 0;
+    if unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) } == pid {
+        return false;
+    }
+    // signal 0 only checks that it exists (EPERM: someone else's, but there)
+    unsafe {
+        libc::kill(pid, 0) == 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+}
+
+/// A TCP port free on loopback right now.
+pub fn free_port() -> Result<u16> {
+    Ok(std::net::TcpListener::bind("127.0.0.1:0")?
+        .local_addr()?
+        .port())
+}
+
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+pub fn base64_encode(data: &[u8]) -> String {
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for c in data.chunks(3) {
+        let n = (c[0] as u32) << 16
+            | (*c.get(1).unwrap_or(&0) as u32) << 8
+            | *c.get(2).unwrap_or(&0) as u32;
+        out.push(B64[(n >> 18) as usize & 63] as char);
+        out.push(B64[(n >> 12) as usize & 63] as char);
+        out.push(if c.len() > 1 {
+            B64[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if c.len() > 2 {
+            B64[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+/// Decodes standard base64, skipping padding and whitespace.
+pub fn base64_decode(s: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let (mut buf, mut bits) = (0u32, 0u32);
+    for c in s.bytes() {
+        let Some(v) = B64.iter().position(|&b| b == c) else {
+            continue;
+        };
+        buf = buf << 6 | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base64_round_trips() {
+        for (raw, enc) in [
+            (&b""[..], ""),
+            (b"f", "Zg=="),
+            (b"fo", "Zm8="),
+            (b"foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(base64_encode(raw), enc);
+            assert_eq!(base64_decode(enc), raw);
+        }
+        assert_eq!(base64_decode("Zm8=\n"), b"fo");
+    }
+
+    #[test]
+    fn this_process_is_alive() {
+        assert!(alive(std::process::id() as i32));
+    }
+}

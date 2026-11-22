@@ -30,38 +30,6 @@ fn pid_file(udid: &str) -> std::path::PathBuf {
     crate::paths::run_dir().join(udid).join("wda.pid")
 }
 
-/// Whether the process runs. A runner this process started and that exited
-/// is a zombie until reaped, which kill(pid, 0) would still call alive.
-fn alive(pid: i32) -> bool {
-    let mut status = 0;
-    if unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) } == pid {
-        return false;
-    }
-    unsafe { libc::kill(pid, 0) == 0 }
-}
-
-fn b64decode(s: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(s.len() * 3 / 4);
-    let (mut buf, mut bits) = (0u32, 0u32);
-    for c in s.bytes() {
-        let v = match c {
-            b'A'..=b'Z' => c - b'A',
-            b'a'..=b'z' => c - b'a' + 26,
-            b'0'..=b'9' => c - b'0' + 52,
-            b'+' => 62,
-            b'/' => 63,
-            _ => continue,
-        } as u32;
-        buf = buf << 6 | v;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push((buf >> bits) as u8);
-        }
-    }
-    out
-}
-
 impl IosPhone {
     pub fn new(udid: &str) -> Self {
         let agent = ureq::Agent::new_with_config(
@@ -139,9 +107,7 @@ impl IosPhone {
         // forward first: another process may have started WebDriverAgent already
         if self.forward.is_none() {
             goios::ensure_tunnel(&self.udid)?;
-            self.port = std::net::TcpListener::bind("127.0.0.1:0")?
-                .local_addr()?
-                .port();
+            self.port = crate::util::free_port()?;
             self.forward = Some(goios::spawn_forward(&self.udid, self.port)?);
             sleep_ms(500);
             if self.ready() {
@@ -155,7 +121,7 @@ impl IosPhone {
         let running = std::fs::read_to_string(&pid_path)
             .ok()
             .and_then(|s| s.trim().parse::<i32>().ok())
-            .is_some_and(alive);
+            .is_some_and(crate::util::alive);
         if !running {
             goios::ensure_tunnel(&self.udid)?;
             crate::paths::ensure_private(&crate::paths::run_dir().join(&self.udid))?;
@@ -189,7 +155,7 @@ impl IosPhone {
             let pid = std::fs::read_to_string(&pid_path)
                 .ok()
                 .and_then(|s| s.trim().parse::<i32>().ok());
-            if pid.is_some_and(|p| !alive(p)) && restarts < 2 {
+            if pid.is_some_and(|p| !crate::util::alive(p)) && restarts < 2 {
                 restarts += 1;
                 log(&format!(
                     "WebDriverAgent runner exited on {}; restarting",
@@ -292,7 +258,7 @@ impl IosPhone {
     pub fn screenshot(&mut self) -> Result<Vec<u8>> {
         self.ensure()?;
         let v = self.request("GET", "/screenshot", None)?;
-        Ok(b64decode(
+        Ok(crate::util::base64_decode(
             v.get("value").and_then(Value::as_str).unwrap_or(""),
         ))
     }
@@ -501,7 +467,7 @@ impl IosPhone {
             if let Some(pid) = std::fs::read_to_string(&pid_path)
                 .ok()
                 .and_then(|s| s.trim().parse::<i32>().ok())
-                && alive(pid)
+                && crate::util::alive(pid)
             {
                 // the whole process group: runwda and what it started
                 unsafe { libc::kill(-pid, libc::SIGTERM) };
@@ -509,14 +475,5 @@ impl IosPhone {
             }
             let _ = std::fs::remove_file(pid_path);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn decodes_base64() {
-        assert_eq!(super::b64decode("Zm9vYmFy"), b"foobar");
-        assert_eq!(super::b64decode("Zm8=\n"), b"fo");
     }
 }

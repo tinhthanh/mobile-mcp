@@ -1,5 +1,20 @@
 # Changelog
 
+## berth-mobile 0.3.0 – 0.4.1 (2026-11-22)
+
+The Node server is retired: the same tools now come from **berth-mobile**, one Rust binary (`berth-mobile/`)
+packaged as Shipyard's "mobile" plugin and released on tinhthanh/vetgo-releases as `mobile-v*`.
+
+* 0.3.0: Rust rewrite with the same 10 tools and screen format; every download pinned by SHA-256 in the binary
+  (adb r37.0.1 like vglink, UiAutomator2, PCAPdroid); OCR helper built in; per-phone lock and shared UiAutomator2
+  for several agents; `setup`/`status`/`settings` for Shipyard; `net` behind a switch, off by default.
+* 0.4.0: iPhones through Appium's WebDriverAgent re-signed with the team's identity, go-ios for the tunnel,
+  installs and the developer disk image; WebDriverAgent bound to the phone's loopback (`USE_IP`), stopped when idle.
+* 0.4.1: iPhone screens read from XML without `visible`/`accessible` (3–13× faster); `tap {text}` reuses a fresh
+  screen.
+* Since: `scripts/signing-backup.sh` and an encrypted backup of the signing keys; `scripts/setup.sh` and
+  `run-test.sh` use berth-mobile; Node sources, npm tooling and `native/pcap_hosts.py` removed (tests ported).
+
 ## 0.2.0 (lite, 2026-11-02)
 
 Android-only rewrite of mobile-mcp 1.0.15 for token-lean agent use.

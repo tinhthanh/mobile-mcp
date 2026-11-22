@@ -78,14 +78,6 @@ pub fn drop_lease(serial: &str) {
     }
 }
 
-fn alive(pid: u32) -> bool {
-    // signal 0 only checks that the process exists
-    unsafe {
-        libc::kill(pid as libc::pid_t, 0) == 0
-            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-    }
-}
-
 /// Whether another live process used the server within `within`. Leases of
 /// processes that are gone are removed.
 pub fn others_using(serial: &str, within: Duration) -> bool {
@@ -109,7 +101,7 @@ pub fn others_using(serial: &str, within: Duration) -> bool {
         if pid == me {
             continue;
         }
-        if !alive(pid) {
+        if !crate::util::alive(pid as i32) {
             let _ = std::fs::remove_file(e.path());
             continue;
         }
