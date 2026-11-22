@@ -40,7 +40,7 @@ cat > "$OUT/berth-plugin.json" <<EOF
   "id": "mobile",
   "name": "Mobile",
   "version": "$VERSION",
-  "description": "Lets agents use an Android phone plugged in over USB: read the screen as compact text, tap, type (Vietnamese ok), swipe, and capture an app's network traffic (berth-mobile $VERSION, darwin-universal).",
+  "description": "Lets agents use an Android phone or an iPhone plugged in over USB: read the screen as compact text, tap, type (Vietnamese ok), swipe, and on Android capture an app's network traffic (berth-mobile $VERSION, darwin-universal).",
   "author": "tinhthanh",
   "homepage": "https://github.com/tinhthanh/mobile-mcp",
   "mcp": {

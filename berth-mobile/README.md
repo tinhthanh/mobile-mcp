@@ -1,4 +1,4 @@
-# berth-mobile — Shipyard's "mobile" plugin
+# berth-mobile — Shipyard's "mobile" plugin (Android and iPhone)
 
 The mobile-mcp-lite tools (`devices`, `screen`, `tap`, `type`, `swipe`, `key`,
 `app`, `wait`, `steps`, `net`) rewritten in Rust as one ~4.5 MB universal
@@ -63,6 +63,31 @@ Environment: `BERTH_MOBILE_ADB` (adb to use), `BERTH_MOBILE_HOME`,
 `BERTH_MOBILE_CACHE`, `LOG_FILE`, `MOBILEMCP_DISABLE_UIA2`,
 `MOBILEMCP_DISABLE_OCR`, `MOBILEMCP_ALL_VIEWS`, `MOBILEMCP_MITMDUMP`,
 `PCAPDROID_API_KEY[_<serial>]`.
+
+## iPhone
+
+iOS runs nothing that isn't signed for the device, so an iPhone needs, once
+per Mac, an Apple Developer team's signing material in
+`~/Library/Application Support/berth-mobile/signing/`:
+
+- `berth-mobile.keychain-db` + `keychain.pass` — an Apple Development identity
+  whose key was made on this Mac, in a keychain of its own (added to the end
+  of the user's keychain search list: `codesign` only looks there);
+- `wda.mobileprovision` — a development profile for a wildcard App ID
+  (`TEAM.prefix.*`) listing the iPhones.
+
+The iPhone must trust the Mac and have Developer Mode on. Then, on first use,
+berth-mobile fetches go-ios 1.3.2 (MIT, pinned), Appium's WebDriverAgent
+16.15.3 (BSD, pinned, re-signed as `prefix.WebDriverAgentRunner.xctrunner`) and
+the iOS 17+ developer disk image (pinned; the phone mounts it only with
+Apple's TSS signature), installs WebDriverAgent, starts go-ios's userspace
+tunnel (no root) and runs WebDriverAgent with `USE_IP=127.0.0.1`: it listens
+on the phone's loopback only, reached through `ios forward` over the cable,
+never on Wi-Fi. It stops when no process used the phone for 5 minutes.
+
+An App Store Connect API key with the Developer role can read devices and
+create certificates but not App IDs or profiles: make those in the Apple
+Developer site (Certificates, IDs & Profiles).
 
 ## Not yet
 

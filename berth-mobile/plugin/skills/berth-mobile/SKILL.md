@@ -1,12 +1,13 @@
 ---
 name: berth-mobile
-description: Use an Android phone plugged into the box over USB through the berth-mobile MCP server (Shipyard's "mobile" plugin) — open apps, read the screen as compact text, tap, type (Vietnamese ok), swipe, wait for text, run several steps at once, and capture which hosts or requests an app makes. Use for manual-QA checks, smoke tests, reproducing a UI bug on a real phone, or inspecting an app's network traffic.
+description: Use an Android phone or an iPhone plugged into the box over USB through the berth-mobile MCP server (Shipyard's "mobile" plugin) — open apps, read the screen as compact text, tap, type (Vietnamese ok), swipe, wait for text, run several steps at once, and capture which hosts or requests an app makes. Use for manual-QA checks, smoke tests, reproducing a UI bug on a real phone, or inspecting an app's network traffic.
 ---
 
-# Android phones with berth-mobile
+# Android phones and iPhones with berth-mobile
 
-The `berth-mobile` MCP server drives a real Android phone over adb. The phone
-belongs to a person: treat what is on it as theirs.
+The `berth-mobile` MCP server drives a real Android phone (adb) or iPhone
+(WebDriverAgent) over USB. The phone belongs to a person: treat what is on it
+as theirs.
 
 ## Loop
 
@@ -34,6 +35,20 @@ minutes for them and then says the phone is busy.
   tokens than text; use only when the check is visual.
 - `swipe up` reveals items below the fold; `tap <text>` fails fast with the
   current screen when the item is not visible.
+
+## iPhone
+
+- `devices` lists iPhones by UDID with `ios<version>`; a line ending in
+  "(not usable: …)" says what the person must set up first.
+- The first call starts WebDriverAgent on the phone (10–60 s); later reads
+  take ~2 s. It stops by itself when nobody uses the phone.
+- `app` takes bundle ids: `com.apple.Preferences`, `com.apple.mobilesafari`;
+  `app {action:"list"}` lists them.
+- There is no BACK key: tap the app's back button (usually top left), or
+  swipe right from the left edge. HOME works.
+- `app=… (locked…)` or "The iPhone is locked": stop and ask the person to
+  unlock it. Never try to enter the passcode.
+- `net` is Android only.
 
 ## Network
 

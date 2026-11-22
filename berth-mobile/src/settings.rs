@@ -14,12 +14,20 @@ pub struct Setting {
 
 pub const NET: &str = "net";
 pub const AUTO_UIA2: &str = "auto-uia2";
+pub const AUTO_WDA: &str = "auto-wda";
 
-pub const SETTINGS: [Setting; 2] = [
+pub const SETTINGS: [Setting; 3] = [
     Setting {
         key: AUTO_UIA2,
         label: "Tự cài UiAutomator2 lên điện thoại",
         description: "Cài APK chính thức của Appium (đã ghim SHA-256) khi gặp điện thoại chưa có: đọc màn hình nhanh hơn và gõ được tiếng Việt.",
+        default: true,
+        warning: None,
+    },
+    Setting {
+        key: AUTO_WDA,
+        label: "Tự cài WebDriverAgent lên iPhone",
+        description: "Ký lại WebDriverAgent chính thức của Appium (đã ghim SHA-256) bằng chứng chỉ Apple Development của anh và cài lên iPhone có trong provisioning profile. Chỉ nghe trên loopback của iPhone, tự tắt khi không dùng.",
         default: true,
         warning: None,
     },

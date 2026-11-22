@@ -8,6 +8,8 @@
 
 mod adb;
 mod fetch;
+mod goios;
+mod ios;
 mod lock;
 mod mcp;
 mod net;
@@ -15,8 +17,10 @@ mod ocr;
 mod paths;
 mod pcap;
 mod screen;
+mod screen_ios;
 mod settings;
 mod shot;
+mod signing;
 mod tools;
 mod uia2;
 mod util;
@@ -98,19 +102,49 @@ fn status() -> Value {
             phones.push(p);
         }
     }
-    let problem = match (&adb, pinned) {
-        (None, _) => Some("Chưa có adb: bấm Set up… để tải platform-tools của Google"),
-        (Some(_), false) => Some(
-            "adb trên máy này khác bản 37.0.1 mà các plugin dùng chung: bấm Set up… để tải bản đúng (tránh hai adb giành nhau)",
-        ),
-        _ => None,
+    let mut problems: Vec<String> = match (&adb, pinned) {
+        (None, _) => vec!["Chưa có adb: bấm Set up… để tải platform-tools của Google".into()],
+        (Some(_), false) => vec![
+            "adb trên máy này khác bản 37.0.1 mà các plugin dùng chung: bấm Set up… để tải bản đúng (tránh hai adb giành nhau)".into(),
+        ],
+        _ => vec![],
     };
+    // iPhones: only when go-ios is here already (status downloads nothing)
+    let profile = signing::read_profile();
+    let mut iphones = Vec::new();
+    if goios::present() {
+        for udid in goios::list().unwrap_or_default() {
+            let mut p = json!({"udid": udid});
+            match &profile {
+                Ok(pr) => match signing::check_device(pr, &udid) {
+                    Ok(()) => p["signing"] = json!("ok"),
+                    Err(e) => {
+                        p["signing"] = json!(e.message);
+                        problems.push(format!("iPhone {udid} chưa có trong provisioning profile"));
+                    }
+                },
+                Err(e) => {
+                    p["signing"] = json!(e.message);
+                    problems.push(
+                        "Có iPhone cắm vào nhưng máy này chưa được thiết lập ký WebDriverAgent"
+                            .into(),
+                    );
+                }
+            }
+            iphones.push(p);
+        }
+    }
     json!({
-        "ready": problem.is_none(),
-        "problem": problem,
+        "ready": problems.is_empty(),
+        "problem": problems,
         "adb": adb.map(|p| p.display().to_string()),
         "adbVersion": version,
         "phones": phones,
+        "iphones": iphones,
+        "iosSigning": match &profile {
+            Ok(p) => json!({"team": p.team, "appId": format!("{}.*", p.prefix), "devices": p.devices.len(), "expires": p.expires, "identity": signing::problem().unwrap_or_else(|| "ok".into())}),
+            Err(e) => json!(e.message),
+        },
         "settings": settings::list_json()["settings"],
     })
 }
@@ -159,6 +193,32 @@ fn setup() -> i32 {
             }
         }
         Err(e) => util::log(&format!("setup: adb devices failed: {e}")),
+    }
+    // iPhones, when this computer signs for them
+    if let Ok(profile) = signing::read_profile() {
+        let prepared = goios::binary().and_then(|_| signing::signed_wda(&profile));
+        match prepared {
+            Err(e) => {
+                util::log(&format!("setup: iOS: {e}"));
+                failed = true;
+            }
+            Ok(app) => {
+                for udid in goios::list().unwrap_or_default() {
+                    let r = signing::check_device(&profile, &udid)
+                        .and_then(|_| goios::install(&udid, &app))
+                        .and_then(|_| goios::ensure_image(&udid));
+                    match r {
+                        Ok(()) => util::log(&format!(
+                            "setup: {udid}: WebDriverAgent installed, developer image mounted"
+                        )),
+                        Err(e) => {
+                            util::log(&format!("setup: {udid}: {e}"));
+                            failed = true;
+                        }
+                    }
+                }
+            }
+        }
     }
     if failed { 1 } else { 0 }
 }

@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 
 use crate::actionable;
 use crate::adb::{self, BUTTONS, Device, Direction};
+use crate::ios::IosPhone;
 use crate::net::NetCapture;
 use crate::screen::{SCREEN_LEGEND, compact_screen, find_line};
 use crate::settings;
@@ -28,10 +29,11 @@ const DEVICE_CACHE: Duration = Duration::from_secs(10);
 
 pub fn instructions() -> String {
     format!(
-        "Drive an Android device over adb. device may be omitted when only one is connected.\n\
+        "Drive an Android phone (adb) or an iPhone (WebDriverAgent) plugged in over USB. device may be omitted when only one is connected.\n\
 Read the screen with screen. {SCREEN_LEGEND}\n\
 tap, type, swipe, key, app and steps return the new screen (or \"unchanged\"); observe=false skips it. Do not call screen right after them.\n\
-Batch known sequences with steps; use wait instead of polling screen."
+Batch known sequences with steps; use wait instead of polling screen.\n\
+On an iPhone, app takes bundle ids (com.apple.Preferences), there is no BACK key (tap the app's back button), and net is not available."
     )
 }
 
@@ -47,6 +49,25 @@ pub struct State {
     last_screen: HashMap<String, String>,
     captures: HashMap<String, NetCapture>,
     devices: Option<(Instant, Vec<String>)>,
+    ios_ids: HashSet<String>,
+    ios: HashMap<String, IosPhone>,
+}
+
+/// iPhones attached, when this computer is set up to sign for them.
+fn ios_devices() -> Vec<String> {
+    if crate::signing::read_profile().is_err() {
+        return Vec::new();
+    }
+    crate::goios::list().unwrap_or_else(|e| {
+        log(&format!("go-ios list failed: {e}"));
+        Vec::new()
+    })
+}
+
+/// PNG width in pixels, from its header.
+fn png_width(png: &[u8]) -> Option<u32> {
+    png.get(16..20)
+        .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
 }
 
 pub type Shared = Arc<Mutex<State>>;
@@ -62,6 +83,14 @@ pub fn spawn_idle_reaper(state: Shared) {
                     u.stop();
                 }
             }
+            for p in s.ios.values_mut() {
+                if p.running()
+                    && p.last_use
+                        .is_some_and(|t| t.elapsed() >= crate::ios::IDLE_STOP)
+                {
+                    p.stop();
+                }
+            }
         }
     });
 }
@@ -74,6 +103,9 @@ pub fn shutdown(state: &Shared) {
     }
     for c in s.captures.values_mut() {
         c.shutdown();
+    }
+    for p in s.ios.values_mut() {
+        p.stop();
     }
 }
 
@@ -227,7 +259,11 @@ impl State {
             .as_ref()
             .is_some_and(|(t, _)| t.elapsed() < DEVICE_CACHE);
         if !fresh {
-            self.devices = Some((Instant::now(), adb::ready_devices()?));
+            let mut ids = adb::ready_devices().unwrap_or_default();
+            let ios = ios_devices();
+            self.ios_ids.extend(ios.iter().cloned());
+            ids.extend(ios);
+            self.devices = Some((Instant::now(), ids));
         }
         let ids = &self.devices.as_ref().expect("set above").1;
         if ids.len() != 1 {
@@ -254,6 +290,127 @@ impl State {
         Ok(Device::new(id))
     }
 
+    /// The iPhone with this UDID, or None for an Android phone.
+    fn ios(&mut self, id: &str) -> Result<Option<&mut IosPhone>> {
+        if !self.ios_ids.contains(id) && !self.known.contains(id) {
+            let ios = ios_devices();
+            self.ios_ids.extend(ios);
+        }
+        if !self.ios_ids.contains(id) {
+            return Ok(None);
+        }
+        Ok(Some(
+            self.ios
+                .entry(id.to_string())
+                .or_insert_with(|| IosPhone::new(id)),
+        ))
+    }
+
+    fn is_ios(&mut self, id: &str) -> Result<bool> {
+        Ok(self.ios(id)?.is_some())
+    }
+
+    fn screenshot(&mut self, id: &str) -> Result<Vec<u8>> {
+        match self.ios(id)? {
+            Some(p) => p.screenshot(),
+            None => self.device(id)?.screenshot(),
+        }
+    }
+
+    fn do_tap(&mut self, id: &str, x: i64, y: i64, mode: &str) -> Result<()> {
+        match self.ios(id)? {
+            Some(p) => match mode {
+                "double" => p.double_tap(x, y),
+                "long" => p.tap(x, y, 800),
+                _ => p.tap(x, y, 50),
+            },
+            None => {
+                let dev = self.device(id)?;
+                match mode {
+                    "double" => dev.double_tap(x, y),
+                    "long" => dev.long_press(x, y, 800),
+                    _ => dev.tap(x, y),
+                }
+            }
+        }
+    }
+
+    fn do_swipe(
+        &mut self,
+        id: &str,
+        d: Direction,
+        from: Option<(i64, i64)>,
+        distance: Option<i64>,
+    ) -> Result<()> {
+        match (self.ios(id)?, from) {
+            (Some(p), Some((x, y))) => p.swipe_from(x, y, d, distance),
+            (Some(p), None) => p.swipe(d),
+            (None, Some((x, y))) => self.device(id)?.swipe_from(x, y, d, distance),
+            (None, None) => self.device(id)?.swipe(d),
+        }
+    }
+
+    fn do_key(&mut self, id: &str, button: &str) -> Result<()> {
+        match self.ios(id)? {
+            Some(p) => p.press_button(button),
+            None => self.device(id)?.press_button(button),
+        }
+    }
+
+    fn list_apps(&mut self, id: &str) -> Result<Vec<String>> {
+        if self.is_ios(id)? {
+            return crate::goios::apps(id, true);
+        }
+        self.device(id)?.list_apps()
+    }
+
+    /// The iPhone's compact screen: WebDriverAgent's tree, OCR when it is thin.
+    fn ios_screen(&mut self, id: &str, force_ocr: bool) -> Result<String> {
+        let p = self.ios(id)?.expect("checked by the caller");
+        let source = p.source()?;
+        let app = p.active_app()?;
+        let mut body = crate::screen_ios::compact(&source);
+        let mut via = "";
+        if force_ocr || body.len() < OCR_FALLBACK_MIN_LINES {
+            let png = p.screenshot()?;
+            let (w, _) = p.size()?;
+            // OCR reads pixels, taps take points
+            let scale = png_width(&png)
+                .map(|px| px as f64 / w.max(1.0))
+                .filter(|s| *s > 0.0)
+                .unwrap_or(1.0);
+            if let Some(ocr) = crate::ocr::ocr_lines(&png) {
+                let ocr: Vec<String> = ocr
+                    .into_iter()
+                    .filter_map(|l| {
+                        let (text, xy) = l.rsplit_once('|')?;
+                        let (x, y) = xy.split_once(',')?;
+                        let (x, y) = (x.trim().parse::<f64>().ok()?, y.trim().parse::<f64>().ok()?);
+                        Some(format!(
+                            "{text}|{},{}",
+                            (x / scale) as i64,
+                            (y / scale) as i64
+                        ))
+                    })
+                    .collect();
+                if force_ocr {
+                    body = ocr;
+                } else {
+                    body.extend(ocr);
+                }
+                via = " (ocr)";
+            }
+        }
+        let locked = if p.locked() {
+            " (locked: ask the person to unlock the iPhone)"
+        } else {
+            ""
+        };
+        let mut out = vec![format!("app={app}{via}{locked}")];
+        out.extend(body);
+        Ok(out.join("\n"))
+    }
+
     fn uia2(&mut self, id: &str) -> Result<Option<&mut Uia2>> {
         if !self.uia2.contains_key(id) {
             let dev = self.device(id)?;
@@ -271,6 +428,9 @@ impl State {
     }
 
     fn capture_screen(&mut self, id: &str, force_ocr: bool) -> Result<String> {
+        if self.is_ios(id)? {
+            return self.ios_screen(id, force_ocr);
+        }
         let source = self.uia2(id)?.and_then(|u| u.source());
         let dev = self.device(id)?;
         let source = match source {
@@ -306,7 +466,8 @@ impl State {
 
     /// Waits for the ui to settle so the agent doesn't get a half-drawn transition.
     fn settled_screen(&mut self, id: &str) -> Result<String> {
-        if self.uia2(id)?.is_none() {
+        // an iPhone's tree takes ~2 s to read: settle once instead of polling
+        if self.is_ios(id)? || self.uia2(id)?.is_none() {
             sleep_ms(SETTLE_MS);
             return self.capture_screen(id, false);
         }
@@ -340,7 +501,6 @@ impl State {
         mode: &str,
         wait_ms: u64,
     ) -> Result<String> {
-        let dev = self.device(id)?;
         let mut prefix = String::new();
         let (x, y) = match xy {
             Some(p) => p,
@@ -373,15 +533,18 @@ impl State {
                 (f.x, f.y)
             }
         };
-        match mode {
-            "double" => dev.double_tap(x, y)?,
-            "long" => dev.long_press(x, y, 800)?,
-            _ => dev.tap(x, y)?,
-        }
+        self.do_tap(id, x, y, mode)?;
         Ok(prefix)
     }
 
     fn type_text(&mut self, id: &str, text: &str, submit: bool) -> Result<()> {
+        if let Some(p) = self.ios(id)? {
+            p.type_text(text)?;
+            if submit {
+                p.press_button("ENTER")?;
+            }
+            return Ok(());
+        }
         // setText handles unicode and replaces the field; `input text` is ascii only and appends
         let typed = self.uia2(id)?.is_some_and(|u| u.set_focused_text(text));
         let dev = self.device(id)?;
@@ -399,6 +562,13 @@ impl State {
             actionable!("package is required for {action}")
         };
         adb::validate_package(pkg)?;
+        if let Some(p) = self.ios(id)? {
+            return if action == "launch" {
+                p.launch(pkg)
+            } else {
+                p.terminate(pkg)
+            };
+        }
         let dev = self.device(id)?;
         if action == "launch" {
             dev.launch_app(pkg)
@@ -442,7 +612,6 @@ impl State {
         if i > 0 && (point.is_some() || verb == "type" || verb == "enter") {
             self.settled_screen(id)?;
         }
-        let dev = self.device(id)?;
         match verb.as_str() {
             "tap" | "long" => {
                 let note = match point {
@@ -454,9 +623,9 @@ impl State {
                 }
             }
             "type" => self.type_text(id, &rest, false)?,
-            "enter" => dev.press_button("ENTER")?,
-            "key" => dev.press_button(&rest)?,
-            "swipe" => dev.swipe(Direction::parse(&rest)?)?,
+            "enter" => self.do_key(id, "ENTER")?,
+            "key" => self.do_key(id, &rest)?,
+            "swipe" => self.do_swipe(id, Direction::parse(&rest)?, None, None)?,
             "wait" | "gone" => {
                 self.wait_for(id, &rest, verb == "gone", DEFAULT_WAIT_MS)?;
             }
@@ -472,6 +641,9 @@ impl State {
             actionable!(
                 "Network capture is off for this computer. The person can turn on \"net\" for the mobile plugin in Shipyard → Settings → Plugins"
             );
+        }
+        if self.is_ios(id)? {
+            actionable!("net works on Android phones only");
         }
         self.device(id)?;
         let capture = self
@@ -498,8 +670,29 @@ impl State {
     }
 
     fn devices_text() -> Result<String> {
-        let listed = adb::list_devices()?;
-        if listed.is_empty() {
+        let listed = adb::list_devices().unwrap_or_default();
+        let mut iphones = Vec::new();
+        if crate::goios::present() || crate::signing::read_profile().is_ok() {
+            for udid in crate::goios::list().unwrap_or_default() {
+                let (model, version) = crate::goios::product(&udid).unwrap_or_default();
+                let mut line = format!("{udid} {model} ios{version}");
+                if let Some(problem) = crate::signing::read_profile()
+                    .err()
+                    .map(|e| e.message)
+                    .or_else(|| {
+                        crate::signing::read_profile().ok().and_then(|p| {
+                            crate::signing::check_device(&p, &udid)
+                                .err()
+                                .map(|e| e.message)
+                        })
+                    })
+                {
+                    line.push_str(&format!(" (not usable: {problem})"));
+                }
+                iphones.push(line);
+            }
+        }
+        if listed.is_empty() && iphones.is_empty() {
             return Ok(
                 "No device. Connect one over USB with USB debugging enabled and authorized.".into(),
             );
@@ -522,6 +715,7 @@ impl State {
                 ),
                 other => format!("{} {other}", d.serial),
             })
+            .chain(iphones)
             .collect::<Vec<_>>()
             .join("\n"))
     }
@@ -536,7 +730,7 @@ impl State {
         let text = match name {
             "screen" => {
                 if a.flag("image") {
-                    let (data, mime) = crate::shot::shrink(self.device(&id)?.screenshot()?);
+                    let (data, mime) = crate::shot::shrink(self.screenshot(&id)?);
                     return Ok(Output::Image {
                         data: base64(&data),
                         mime,
@@ -558,21 +752,17 @@ impl State {
             }
             "swipe" => {
                 let d = Direction::parse(&a.req_str("direction")?)?;
-                let dev = self.device(&id)?;
-                match a.int("x").zip(a.int("y")) {
-                    Some((x, y)) => dev.swipe_from(x, y, d, a.int("distance"))?,
-                    None => dev.swipe(d)?,
-                }
+                self.do_swipe(&id, d, a.int("x").zip(a.int("y")), a.int("distance"))?;
                 self.after_action(&id, a.observe(), "")?
             }
             "key" => {
-                self.device(&id)?.press_button(&a.req_str("button")?)?;
+                self.do_key(&id, &a.req_str("button")?)?;
                 self.after_action(&id, a.observe(), "")?
             }
             "app" => {
                 let action = a.req_str("action")?;
                 if action == "list" {
-                    return Ok(Output::Text(self.device(&id)?.list_apps()?.join("\n")));
+                    return Ok(Output::Text(self.list_apps(&id)?.join("\n")));
                 }
                 if action != "launch" && action != "stop" {
                     actionable!("action must be launch, stop or list");
