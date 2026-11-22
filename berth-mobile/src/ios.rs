@@ -30,7 +30,13 @@ fn pid_file(udid: &str) -> std::path::PathBuf {
     crate::paths::run_dir().join(udid).join("wda.pid")
 }
 
+/// Whether the process runs. A runner this process started and that exited
+/// is a zombie until reaped, which kill(pid, 0) would still call alive.
 fn alive(pid: i32) -> bool {
+    let mut status = 0;
+    if unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) } == pid {
+        return false;
+    }
     unsafe { libc::kill(pid, 0) == 0 }
 }
 
@@ -170,18 +176,27 @@ impl IosPhone {
                 std::fs::write(&marker, &profile.sha)?;
             }
             goios::ensure_image(&self.udid)?;
-            let log_file = crate::paths::run_dir().join(&self.udid).join("wda.log");
-            let pid = goios::spawn_wda(&self.udid, &bundle, &log_file)?;
-            std::fs::write(&pid_path, pid.to_string())?;
-            log(&format!(
-                "starting WebDriverAgent on {} (pid {pid})",
-                self.udid
-            ));
+            self.spawn_wda(&bundle)?;
         }
         let deadline = Instant::now() + START_TIMEOUT;
+        let mut restarts = 0;
         while Instant::now() < deadline {
             if self.ready() {
                 return Ok(());
+            }
+            // the runner dies when the tunnel reconnects (the phone locked, the
+            // cable moved): start it again rather than wait for nothing
+            let pid = std::fs::read_to_string(&pid_path)
+                .ok()
+                .and_then(|s| s.trim().parse::<i32>().ok());
+            if pid.is_some_and(|p| !alive(p)) && restarts < 2 {
+                restarts += 1;
+                log(&format!(
+                    "WebDriverAgent runner exited on {}; restarting",
+                    self.udid
+                ));
+                goios::ensure_tunnel(&self.udid)?;
+                self.spawn_wda(&bundle)?;
             }
             sleep_ms(500);
         }
@@ -189,6 +204,17 @@ impl IosPhone {
             "WebDriverAgent did not start on {}. If the iPhone asks, trust the developer in Settings → General → VPN & Device Management, and keep it unlocked",
             self.udid
         )))
+    }
+
+    fn spawn_wda(&self, bundle: &str) -> Result<()> {
+        let log_file = crate::paths::run_dir().join(&self.udid).join("wda.log");
+        let pid = goios::spawn_wda(&self.udid, bundle, &log_file)?;
+        std::fs::write(pid_file(&self.udid), pid.to_string())?;
+        log(&format!(
+            "starting WebDriverAgent on {} (pid {pid})",
+            self.udid
+        ));
+        Ok(())
     }
 
     /// The current session (shared with other processes through /status).
@@ -380,8 +406,7 @@ impl IosPhone {
         Ok(())
     }
 
-    /// Replaces the focused field's text (Unicode ok); types at the cursor
-    /// when no field reports focus.
+    /// Replaces the focused field's text (Unicode ok).
     pub fn type_text(&mut self, text: &str) -> Result<()> {
         let id_of = |v: &Value| -> Option<String> {
             let e = v.get("value")?;
@@ -414,7 +439,9 @@ impl IosPhone {
                 )?;
             }
             None => {
-                self.in_session("POST", "/wda/keys", Some(json!({"value": [text]})))?;
+                return Err(Error::actionable(
+                    "No text field has focus on the iPhone: tap the field first",
+                ));
             }
         }
         Ok(())

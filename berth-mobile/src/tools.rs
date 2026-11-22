@@ -368,6 +368,10 @@ impl State {
     fn ios_screen(&mut self, id: &str, force_ocr: bool) -> Result<String> {
         let p = self.ios(id)?.expect("checked by the caller");
         let source = p.source()?;
+        if let Some(path) = std::env::var_os("BERTH_MOBILE_DUMP") {
+            // debugging aid: the raw tree, for fixtures
+            let _ = std::fs::write(path, source.to_string());
+        }
         let app = p.active_app()?;
         let mut body = crate::screen_ios::compact(&source);
         let mut via = "";
