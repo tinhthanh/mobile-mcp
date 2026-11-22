@@ -85,6 +85,11 @@ tunnel (no root) and runs WebDriverAgent with `USE_IP=127.0.0.1`: it listens
 on the phone's loopback only, reached through `ios forward` over the cable,
 never on Wi-Fi. It stops when no process used the phone for 5 minutes.
 
+The screen is read from WebDriverAgent's XML source without the `visible` and
+`accessible` attributes, which XCTest computes element by element (a home
+screen: 0.6 s instead of 8 s); hidden elements are dropped by their frame
+instead. `BERTH_MOBILE_IOS_JSON=1` reads the full JSON tree, for comparing.
+
 An App Store Connect API key with the Developer role can read devices and
 create certificates but not App IDs or profiles: make those in the Apple
 Developer site (Certificates, IDs & Profiles).

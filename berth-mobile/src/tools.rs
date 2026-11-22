@@ -26,6 +26,8 @@ const DEFAULT_WAIT_MS: u64 = 10000;
 const MAX_WAIT_MS: u64 = 30000;
 const MAX_STEPS: usize = 30;
 const DEVICE_CACHE: Duration = Duration::from_secs(10);
+/// How long an iPhone screen read stays good for `tap {text}`.
+const FRESH_FOR: Duration = Duration::from_secs(5);
 
 pub fn instructions() -> String {
     format!(
@@ -51,6 +53,9 @@ pub struct State {
     devices: Option<(Instant, Vec<String>)>,
     ios_ids: HashSet<String>,
     ios: HashMap<String, IosPhone>,
+    /// An iPhone's last read screen, until the next action: reading one
+    /// takes ~2 s, so `tap {text}` right after `screen` reuses it.
+    fresh: HashMap<String, (Instant, String)>,
 }
 
 /// iPhones attached, when this computer is set up to sign for them.
@@ -318,6 +323,7 @@ impl State {
     }
 
     fn do_tap(&mut self, id: &str, x: i64, y: i64, mode: &str) -> Result<()> {
+        self.fresh.remove(id);
         match self.ios(id)? {
             Some(p) => match mode {
                 "double" => p.double_tap(x, y),
@@ -342,6 +348,7 @@ impl State {
         from: Option<(i64, i64)>,
         distance: Option<i64>,
     ) -> Result<()> {
+        self.fresh.remove(id);
         match (self.ios(id)?, from) {
             (Some(p), Some((x, y))) => p.swipe_from(x, y, d, distance),
             (Some(p), None) => p.swipe(d),
@@ -351,6 +358,7 @@ impl State {
     }
 
     fn do_key(&mut self, id: &str, button: &str) -> Result<()> {
+        self.fresh.remove(id);
         match self.ios(id)? {
             Some(p) => p.press_button(button),
             None => self.device(id)?.press_button(button),
@@ -433,7 +441,10 @@ impl State {
 
     fn capture_screen(&mut self, id: &str, force_ocr: bool) -> Result<String> {
         if self.is_ios(id)? {
-            return self.ios_screen(id, force_ocr);
+            let screen = self.ios_screen(id, force_ocr)?;
+            self.fresh
+                .insert(id.to_string(), (Instant::now(), screen.clone()));
+            return Ok(screen);
         }
         let source = self.uia2(id)?.and_then(|u| u.source());
         let dev = self.device(id)?;
@@ -514,7 +525,15 @@ impl State {
                 };
                 // the target may still be animating in: look for it a little while
                 let deadline = Instant::now() + Duration::from_millis(wait_ms);
-                let mut screen = self.capture_screen(id, false)?;
+                let recent = self
+                    .fresh
+                    .get(id)
+                    .filter(|(t, _)| t.elapsed() < FRESH_FOR)
+                    .map(|(_, s)| s.clone());
+                let mut screen = match recent {
+                    Some(s) => s,
+                    None => self.capture_screen(id, false)?,
+                };
                 let mut found = find_line(&screen, text);
                 while found.is_none() && Instant::now() < deadline {
                     sleep_ms(POLL_MS);
@@ -542,6 +561,7 @@ impl State {
     }
 
     fn type_text(&mut self, id: &str, text: &str, submit: bool) -> Result<()> {
+        self.fresh.remove(id);
         if let Some(p) = self.ios(id)? {
             p.type_text(text)?;
             if submit {
@@ -562,6 +582,7 @@ impl State {
     }
 
     fn app(&mut self, id: &str, action: &str, package: Option<&str>) -> Result<()> {
+        self.fresh.remove(id);
         let Some(pkg) = package.filter(|p| !p.is_empty()) else {
             actionable!("package is required for {action}")
         };
@@ -614,7 +635,12 @@ impl State {
             });
         // let the previous action finish its transition before acting on coordinates
         if i > 0 && (point.is_some() || verb == "type" || verb == "enter") {
-            self.settled_screen(id)?;
+            if self.is_ios(id)? {
+                // a read costs ~2 s on an iPhone: give the transition time instead
+                sleep_ms(SETTLE_MS);
+            } else {
+                self.settled_screen(id)?;
+            }
         }
         match verb.as_str() {
             "tap" | "long" => {

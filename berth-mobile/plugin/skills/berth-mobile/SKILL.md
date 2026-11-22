@@ -41,7 +41,7 @@ minutes for them and then says the phone is busy.
 - `devices` lists iPhones by UDID with `ios<version>`; a line ending in
   "(not usable: …)" says what the person must set up first.
 - The first call starts WebDriverAgent on the phone (10–60 s); later reads
-  take ~2 s. It stops by itself when nobody uses the phone.
+  take well under a second. It stops by itself when nobody uses the phone.
 - `app` takes bundle ids: `com.apple.Preferences`, `com.apple.mobilesafari`;
   `app {action:"list"}` lists them.
 - There is no BACK key: tap the app's back button (usually top left), or

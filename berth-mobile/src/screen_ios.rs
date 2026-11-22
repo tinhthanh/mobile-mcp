@@ -248,9 +248,40 @@ impl Walker {
     }
 }
 
+/// WebDriverAgent's XML source (fetched without `visible` and `accessible`,
+/// which XCTest computes slowly: ~0.5 s instead of ~8 s on a home screen) as
+/// the JSON-like tree `compact` reads. Without `visible`, hidden elements are
+/// told apart by their frame: zero-sized or off the screen.
+pub fn xml_tree(xml: &str) -> Option<Value> {
+    let doc = roxmltree::Document::parse(xml).ok()?;
+    fn conv(n: roxmltree::Node) -> Value {
+        let a = |k: &str| n.attribute(k).unwrap_or("");
+        let num = |k: &str| a(k).parse::<f64>().unwrap_or(0.0);
+        let mut v = serde_json::json!({
+            "type": a("type"),
+            "label": a("label"),
+            "name": a("name"),
+            "value": a("value"),
+            "traits": a("traits"),
+            "rect": {"x": num("x"), "y": num("y"), "width": num("width"), "height": num("height")},
+        });
+        if let Some(e) = n.attribute("enabled") {
+            v["isEnabled"] = Value::String(if e == "true" { "1" } else { "0" }.into());
+        }
+        let kids: Vec<Value> = n.children().filter(|c| c.is_element()).map(conv).collect();
+        v["children"] = Value::Array(kids);
+        v
+    }
+    Some(conv(doc.root_element()))
+}
+
 /// Lines of the compact screen (without the `app=` line).
 pub fn compact(source: &Value) -> Vec<String> {
-    let root = source.get("value").unwrap_or(source);
+    // WDA wraps its JSON tree in {"value": …}; an element's own value is a string
+    let root = source
+        .get("value")
+        .filter(|v| v.is_object())
+        .unwrap_or(source);
     let mut w = Walker {
         screen: rect(root),
         entries: Vec::new(),
@@ -344,6 +375,21 @@ mod tests {
                 "*Gửi|50,320 off"
             ]
         );
+    }
+
+    #[test]
+    fn reads_wda_xml_without_visible() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<XCUIElementTypeApplication type="XCUIElementTypeApplication" name="Settings" label="Settings" x="0" y="0" width="375" height="812">
+  <XCUIElementTypeCell type="XCUIElementTypeCell" enabled="true" x="16" y="440" width="343" height="53">
+    <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" value="Pin" label="Pin" enabled="true" x="60" y="450" width="40" height="20"/>
+  </XCUIElementTypeCell>
+  <XCUIElementTypeIcon type="XCUIElementTypeIcon" name="Maps" label="Bản đồ" enabled="true" x="400" y="100" width="60" height="60"/>
+  <XCUIElementTypeIcon type="XCUIElementTypeIcon" name="Hidden" label="Hidden" enabled="true" x="0" y="0" width="0" height="0"/>
+  <XCUIElementTypeButton type="XCUIElementTypeButton" name="send" label="Gửi" enabled="false" x="0" y="300" width="100" height="40"/>
+</XCUIElementTypeApplication>"#;
+        let tree = xml_tree(xml).unwrap();
+        assert_eq!(compact(&tree), ["*Pin|187,466", "*Gửi|50,320 off"]);
     }
 
     #[test]

@@ -275,7 +275,18 @@ impl IosPhone {
 
     pub fn source(&mut self) -> Result<Value> {
         self.ensure()?;
-        self.request("GET", "/source?format=json", None)
+        if std::env::var_os("BERTH_MOBILE_IOS_JSON").is_some() {
+            // the slow full tree, with isVisible: for comparing
+            return self.request("GET", "/source?format=json", None);
+        }
+        let v = self.request(
+            "GET",
+            "/source?format=xml&excluded_attributes=visible,accessible",
+            None,
+        )?;
+        let xml = v.get("value").and_then(Value::as_str).unwrap_or("");
+        crate::screen_ios::xml_tree(xml)
+            .ok_or_else(|| Error::other("couldn't read the iPhone's screen"))
     }
 
     pub fn screenshot(&mut self) -> Result<Vec<u8>> {
