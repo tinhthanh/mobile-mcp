@@ -1,151 +1,68 @@
-# mobile-mcp-lite
+# mobile-mcp (berth-mobile)
 
-Token-lean MCP server for driving a real Android phone over `adb`, plus an `android-tester` subagent for
-Claude Code. Fork of [mobile-next/mobile-mcp](https://github.com/mobile-next/mobile-mcp) (Apache-2.0),
-trimmed to Android only. No root needed.
+Token-lean MCP server that lets coding agents drive a real **Android phone** (adb) or **iPhone**
+(WebDriverAgent) plugged in over USB, packaged as Shipyard's **"mobile"** plugin. One ~4.5 MB
+universal macOS binary written in Rust, in [`berth-mobile/`](berth-mobile/). Fork of
+[mobile-next/mobile-mcp](https://github.com/mobile-next/mobile-mcp) (Apache-2.0); the original Node
+server was retired in favour of the Rust rewrite.
 
-## Quick start (macOS)
+## Install
+
+**With Shipyard:** Settings → Plugins → **Install from URL** →
+`https://github.com/tinhthanh/vetgo-releases/releases/download/mobile-v<version>/mobile-<version>.tar.gz`
+(leave the SHA-256 empty). Allow it; setup runs at once. Agents get the `berth-mobile` MCP server and skill.
+
+**Without Shipyard (macOS):**
 
 ```bash
-git clone https://github.com/tinhthanh/mobile-mcp.git && mobile-mcp/scripts/setup.sh
+git clone https://github.com/tinhthanh/mobile-mcp.git && mobile-mcp/scripts/setup.sh --yes
 ```
 
-One command, safe to re-run (~6 s when nothing changed): installs adb and Node if missing, builds, waits for a phone
-(telling you to enable USB debugging or tap *Allow* if needed), installs the pinned UiAutomator2 server on every
-connected phone and checks it reads the screen, then registers the `mobile-lite` MCP server, the `android-tester`
-subagent and (after asking) the `mcp__mobile-lite` permission in Claude Code. Add `--net` for network capture
-(mitmproxy, PCAPdroid, its api key and VPN consent, all automatic), `--with-ca` to push the mitmproxy CA,
-`--serial <id>` for one phone, `--yes` to skip the question. `scripts/setup.sh verify` checks a phone.
-`scripts/setup.sh mirror install` shows the phone's screen on the Mac with mouse and keyboard control (scrcpy over
-USB) whenever it is plugged in: no consent dialog, no accessibility service, nothing reachable over Wi‑Fi.
+Builds berth-mobile, fetches adb if needed, installs UiAutomator2 on connected phones, registers the
+`berth-mobile` MCP server and the `android-tester` subagent in Claude Code. iPhones need signing set up once:
+see [berth-mobile/README.md](berth-mobile/README.md#iphone). Vietnamese guide: [docs/SETUP.md](docs/SETUP.md).
 
-Then, in a new Claude Code session: *"Use android-tester to check that Settings > Display shows Dark mode"*.
-Manual steps, troubleshooting and cleanup: [docs/SETUP.md](docs/SETUP.md) (Vietnamese).
+Then: *"Use android-tester to check that Settings > Display shows Dark mode"*.
 
-## What changed vs upstream
+## Tools
 
-Measured on a ZTE Blade A54 (Android 13).
-
-| | upstream mobile-mcp | lite |
-|---|---|---|
-| Tools / schema tokens per session | 34 / ~7,500 | 10 / ~1,240 |
-| Settings screen read | ~2,300 tokens, 1.2 s | ~95 tokens, ~0.08 s (UiAutomator2 server 10.6.6) |
-| Action then observe | 2 calls | 1 call (actions return the new screen, or `unchanged`) |
-| Known sequences | `mobile_batch_commands` | `steps` with short actions, `wait` for text |
-| Accessibility tree empty (games, canvas) | screenshot (~600+ image tokens) | Apple Vision OCR on macOS (~80 tokens) |
-| Unicode / Vietnamese typing | needs DeviceKit app | UiAutomator2 `setText` |
-| Network inspection | — | `net`: mitmproxy over USB, PCAPdroid per app |
-| Native binary | `mobilecli` (FSL-1.1, closed build) | none, plain `adb` |
-| Telemetry | PostHog + Scarf | none |
-| iOS, cloud devices, recording, install helper | yes | removed |
-
-A 3-part smoke test (UI check, Vietnamese typing, Zalo network) costs 7 turns, 38 s, $0.037 with
-`scripts/run-test.sh` on Sonnet.
-
-## Screen format
+`devices`, `screen`, `tap`, `type`, `swipe`, `key`, `app`, `wait`, `steps`, `net` (Android only). The screen is
+one line per element with its tap point:
 
 ```
 app=com.android.settings
 *Wi‑Fi · Example WiFi|360,375
 *Bluetooth · Off|360,495
 #Search settings|371,267
-~recycler_view|360,918
 ```
 
-`<mark><label>|x,y [flags]`: x,y is the point to tap. Marks: `*` tappable, `#` text input,
-`~` scrollable, space = plain text. Flags: `on`, `sel`, `off` (disabled), `focus`.
-Texts inside a tappable row are merged into it; id-only views stacked on a labelled one are dropped.
+Marks: `*` tappable, `#` text input, `~` scrollable, space = plain text; flags `on`, `sel`, `off`, `focus`.
+Actions return the settled screen (or `unchanged`); `steps` runs a known sequence in one call; `wait` polls for
+text; OCR (Apple Vision) fills in screens without an accessibility tree.
 
-## Tools
+## What changed vs upstream
 
-`devices`, `screen {ocr?, image?}`, `tap {x,y | text, mode?}`, `type {text, submit?}`, `swipe {direction, x?, y?, distance?}`,
-`key {button}`, `app {launch|stop|list, package?}`, `wait {text, gone?, timeout?}`, `steps {steps[]}`, `net {...}`.
+| | upstream mobile-mcp | this fork |
+|---|---|---|
+| Tools / schema tokens per session | 34 / ~7,500 | 10 / ~1,240 |
+| Settings screen read (Android) | ~2,300 tokens, 1.2 s | ~95 tokens, 0.1–0.4 s (UiAutomator2 10.6.6) |
+| iPhone screen read | mobilecli + DeviceKit | WebDriverAgent XML without `visible`: 0.3–0.7 s |
+| Unicode / Vietnamese typing | DeviceKit app | UiAutomator2 / WebDriverAgent setText |
+| Network inspection | — | `net`: mitmproxy over USB, PCAPdroid per app |
+| Several agents on one phone | — | per-phone lock, shared server, idle stop |
+| Runtime | Node + `mobilecli` (FSL-1.1) | one Rust binary, every download pinned by SHA-256 |
+| Telemetry | PostHog + Scarf | none |
 
-- `device` is optional when one device is connected.
-- Actions accept `observe=false` to skip reading the screen afterwards. With the UiAutomator2 server they return the
-  screen once two reads agree, so coordinates are not taken mid-animation.
-- `tap {text}` finds the element on the current screen (exact label on a tappable line first; the first of several
-  matches is tapped and reported).
-- Calls run one at a time, even when a client sends several in parallel.
+More: [berth-mobile/README.md](berth-mobile/README.md) (what runs, settings, iPhone, commands),
+[SECURITY.md](SECURITY.md), [CHANGELOG.md](CHANGELOG.md).
 
-`steps` runs a known sequence in one call and returns the final screen, stopping at the first failure with the
-current screen:
+## Other scripts
 
-```json
-{"steps": ["launch com.android.settings", "tap Display", "wait Dark mode", "key BACK"]}
-```
-
-Actions: `tap <text|x,y>`, `long <text|x,y>`, `type <text>`, `enter`, `key <BUTTON>`, `swipe <dir>`, `wait <text>`,
-`gone <text>`, `launch <package>`, `stop <package>`, `sleep <ms>`.
-
-## Network capture: `net`
-
-`net {start | list | show {id} | stop}` captures the device's HTTP(S) requests with mitmproxy, reached over USB
-with `adb reverse` plus the device's global `http_proxy`: nothing listens on the LAN.
-
-```
-#1 POST 200 httpbin.org/post 481B 557ms application/json
-tls (not decrypted): www.google.com, api.example.com×3
-```
-
-- `list` returns only requests since the previous list (`all=true` for everything), `filter` matches host/path.
-- HTTPS is passed through and only the host is recorded, so apps keep working. `start {decrypt:"api\\.myapp\\.com"}`
-  decrypts matching hosts; that needs the mitmproxy CA installed as a user CA and an app that trusts user CAs
-  (a debug build with `network_security_config`, see [docs/SETUP.md](docs/SETUP.md)).
-- Only apps honoring the system proxy show up (OkHttp/HttpURLConnection do; Zalo, Flutter and custom sockets mostly do not).
-  `start {app:"com.zing.zalo"}` captures one app with [PCAPdroid](https://f-droid.org/packages/com.emanuelef.remote_capture/)
-  instead (per-app VPN): every connection, hosts only, one line per destination from TLS SNI, HTTP Host and DNS
-  (`tls api.example.com:443 conns=2 bytes=6310`).
-- `show` hides browser/transport headers unless `all=true`, and redacts auth/cookie headers, credential-like keys and
-  bearer tokens in bodies; bodies are cut at 2,000 chars.
-- The proxy is cleared on `stop` and on exit. A proxy left by a server killed hard is cleared the next time the server
-  touches the device; to fix it at once: `adb shell settings put global http_proxy :0`.
-
-## android-tester subagent
-
-[`.claude/agents/android-tester.md`](.claude/agents/android-tester.md): Sonnet, only the mobile-lite tools, cost rules
-(`steps`, `wait`, images only for visual checks), safety rules (no sending, calling, paying or settings changes unless
-the task asks for exactly that) and a PASS/FAIL report quoting screen lines.
-
-- From Claude Code: delegate to it by name. Add `"permissions": {"allow": ["mcp__mobile-lite"]}` to
-  `~/.claude/settings.json` so its calls are not prompted one by one.
-- Headless, cheapest: `scripts/run-test.sh "<task>"` (prints the report and `[turns, seconds, $]`, exits 1 unless PASS;
-  `MODEL=haiku`, `STREAM=run.jsonl`).
-
-## Configuration
-
-| Variable | Effect |
-|---|---|
-| `MOBILEMCP_KEYS_FILE` | PCAPdroid api keys (`PCAPDROID_API_KEY_<serial>=…`), default `~/.config/mobile-mcp-lite/keys.env` |
-| `PCAPDROID_API_KEY[_<serial>]` | Same keys from the environment, read before the file |
-| `MOBILEMCP_DISABLE_UIA2=1` | Do not use the UiAutomator2 server (slower reads, ASCII-only typing) |
-| `MOBILEMCP_ALL_VIEWS=1` | Keep unimportant views in page source (slower) |
-| `MOBILEMCP_DISABLE_OCR=1` / `MOBILEMCP_OCR_BIN` | Turn OCR off / use a prebuilt OCR binary |
-| `MOBILEMCP_MITMDUMP` | Path to `mitmdump` |
-| `LOG_FILE` | Append the server log to this file |
-
-Without `scripts/setup.sh`: `npm ci --ignore-scripts && npm run build && claude mcp add -s user mobile-lite -- node "$PWD/lib/index.js"`.
-Needs `adb` on PATH (or `ANDROID_HOME`); OCR needs Xcode command line tools (`native/ocr.swift` is compiled once into
-`~/Library/Caches/mobile-mcp-lite/`).
-
-## UiAutomator2 server
-
-With `io.appium.uiautomator2.server` (+ `.test`) installed, the server keeps UiAutomation alive on the device: screen
-reads take ~0.2 s instead of ~2.7 s for `uiautomator dump`, and `type` accepts any Unicode text. `scripts/setup.sh`
-installs 10.6.6 with pinned hashes.
-
-- Started on first use, stopped after 5 idle minutes and on exit. While it runs, any app on the device can reach it
-  on `localhost:6790`.
-- If page source keeps failing on a screen, reads fall back to `uiautomator dump` for 60 s.
-
-## Known limits
-
-- `type` replaces the field with the UiAutomator2 server, but appends (ASCII only) without it.
-- `net list` in PCAPdroid mode returns the whole summary each time, not only new hosts.
-- OCR can still read some icons as short words.
-- The api key step of `scripts/setup.sh --net` relies on PCAPdroid's English UI; other languages need the manual step.
+- `scripts/run-test.sh "<task>"` runs one android-tester task headless with the leanest context.
+- `scripts/setup.sh mirror` shows and controls the phone on the Mac over USB with scrcpy.
+- `berth-mobile/scripts/package.sh` builds the plugin; `berth-mobile/scripts/signing-backup.sh` backs up the iOS
+  signing keys.
 
 ## License
 
-Apache-2.0, as upstream. This fork rewrites `src/server.ts` and adds `src/screen.ts`, `src/net.ts`, `src/uia2.ts`,
-`src/ocr.ts`, `native/` and `scripts/`; see [CHANGELOG.md](CHANGELOG.md) for the changes.
+Apache-2.0, see [LICENSE](LICENSE).

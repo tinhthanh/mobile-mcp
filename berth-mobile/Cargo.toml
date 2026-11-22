@@ -1,0 +1,27 @@
+[package]
+name = "berth-mobile"
+version = "0.4.2"
+description = "Token-lean Android control over adb as an MCP server, packaged as Shipyard's \"mobile\" plugin"
+edition = "2024"
+rust-version = "1.89"
+license = "Apache-2.0"
+repository = "https://github.com/tinhthanh/mobile-mcp"
+publish = false
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+libc = "0.2"
+regex-lite = "0.1"
+roxmltree = "0.20"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+unicode-normalization = "0.1"
+ureq = { version = "3", features = ["json"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = "s"
+panic = "abort"
