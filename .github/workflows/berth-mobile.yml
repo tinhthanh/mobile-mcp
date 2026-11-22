@@ -1,0 +1,54 @@
+# berth-mobile: Shipyard's "mobile" plugin (Rust, in berth-mobile/).
+#
+# Pushes and pull requests that touch it run the tests. A tag mobile-v<version>
+# (matching berth-mobile/Cargo.toml) also builds the universal macOS plugin and
+# publishes it on the public tinhthanh/vetgo-releases as mobile-v<version>:
+# mobile-<version>.tar.gz and its .sha256, ready for Shipyard's Install from URL.
+#
+# Secret: RELEASES_TOKEN, a token that may write releases on tinhthanh/vetgo-releases.
+name: berth-mobile
+
+on:
+  push:
+    branches: [main, plugin]
+    tags: ["mobile-v*"]
+    paths: ["berth-mobile/**", "native/**", "test/fixtures/**", ".github/workflows/berth-mobile.yml"]
+  pull_request:
+    paths: ["berth-mobile/**", "native/**", "test/fixtures/**", ".github/workflows/berth-mobile.yml"]
+
+permissions:
+  contents: read
+
+env:
+  RELEASES_REPO: tinhthanh/vetgo-releases
+
+jobs:
+  test:
+    runs-on: macos-15
+    defaults: { run: { working-directory: berth-mobile } }
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal -c clippy -t x86_64-apple-darwin
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/mobile-v')
+    needs: test
+    runs-on: macos-15
+    defaults: { run: { working-directory: berth-mobile } }
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal -t x86_64-apple-darwin
+      - name: Tag matches Cargo.toml
+        run: |
+          v=$(awk -F'"' '/^version =/ { print $2; exit }' Cargo.toml)
+          [ "mobile-v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME but Cargo.toml says $v"; exit 1; }
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+      - run: scripts/package.sh
+      - name: Publish on vetgo-releases
+        env: { GH_TOKEN: "${{ secrets.RELEASES_TOKEN }}" }
+        run: |
+          gh release create "mobile-v$VERSION" dist/mobile-$VERSION.tar.gz dist/mobile-$VERSION.tar.gz.sha256 \
+            -R "$RELEASES_REPO" --title "mobile $VERSION" \
+            --notes "Shipyard plugin \"mobile\" (berth-mobile $VERSION, macOS universal): agents drive an Android phone over USB. Install: Shipyard → Settings → Plugins → Install from URL → https://github.com/$RELEASES_REPO/releases/download/mobile-v$VERSION/mobile-$VERSION.tar.gz (the .sha256 beside it is picked up)."
