@@ -132,7 +132,16 @@ mod tests {
             Err(std::fs::TryLockError::WouldBlock)
         ));
         drop(a);
-        assert!(f.try_lock().is_ok());
+        // a child another test is spawning can hold a copy of the descriptor
+        // until its exec closes it: allow a moment for the lock to go
+        let free = (0..200).any(|_| {
+            let ok = f.try_lock().is_ok();
+            if !ok {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            ok
+        });
+        assert!(free);
         let _ = std::fs::remove_dir_all(dir);
     }
 }
