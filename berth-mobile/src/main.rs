@@ -134,6 +134,16 @@ fn status() -> Value {
             iphones.push(p);
         }
     }
+    if let Ok(p) = &profile
+        && let Some(days) = p.days_left()
+        && days < 30
+    {
+        problems.push(if days < 0 {
+            "Chứng chỉ / provisioning profile ký iPhone đã hết hạn: tạo lại trên Apple Developer".to_string()
+        } else {
+            format!("Chứng chỉ / provisioning profile ký iPhone hết hạn sau {days} ngày: tạo lại trên Apple Developer")
+        });
+    }
     json!({
         "ready": problems.is_empty(),
         "problem": problems,
@@ -142,7 +152,7 @@ fn status() -> Value {
         "phones": phones,
         "iphones": iphones,
         "iosSigning": match &profile {
-            Ok(p) => json!({"team": p.team, "appId": format!("{}.*", p.prefix), "devices": p.devices.len(), "expires": p.expires, "identity": signing::problem().unwrap_or_else(|| "ok".into())}),
+            Ok(p) => json!({"team": p.team, "appId": format!("{}.*", p.prefix), "devices": p.devices.len(), "expires": p.expires, "daysLeft": p.days_left(), "identity": signing::problem().unwrap_or_else(|| "ok".into())}),
             Err(e) => json!(e.message),
         },
         "settings": settings::list_json()["settings"],

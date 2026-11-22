@@ -147,10 +147,13 @@ pub fn ensure_tunnel(udid: &str) -> Result<()> {
     let out = std::fs::File::create(&log_file)?;
     let mut cmd = command(None, &["tunnel", "start", "--userspace"])?;
     detach(&mut cmd);
-    cmd.stdin(Stdio::null())
+    let child = cmd
+        .stdin(Stdio::null())
         .stdout(out.try_clone()?)
         .stderr(out)
         .spawn()?;
+    // remembered so the last user can stop it (stop_tunnel_if_unused)
+    std::fs::write(tunnel_pid_file(), child.id().to_string())?;
     let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline {
         if up(udid) {
@@ -162,6 +165,37 @@ pub fn ensure_tunnel(udid: &str) -> Result<()> {
         "go-ios tunnel didn't reach the iPhone (see {})",
         log_file.display()
     )))
+}
+
+fn tunnel_pid_file() -> PathBuf {
+    crate::paths::run_dir().join("tunnel.pid")
+}
+
+/// Stops the tunnel berth-mobile started once no iPhone runs WebDriverAgent
+/// any more. A tunnel someone else started (no pid file) is left alone.
+pub fn stop_tunnel_if_unused() {
+    let Ok(entries) = std::fs::read_dir(crate::paths::run_dir()) else {
+        return;
+    };
+    let pid_in = |p: PathBuf| {
+        std::fs::read_to_string(p)
+            .ok()
+            .and_then(|s| s.trim().parse::<i32>().ok())
+    };
+    let wda_running = entries
+        .flatten()
+        .filter_map(|e| pid_in(e.path().join("wda.pid")))
+        .any(crate::util::alive);
+    if wda_running {
+        return;
+    }
+    if let Some(pid) = pid_in(tunnel_pid_file()) {
+        if crate::util::alive(pid) {
+            unsafe { libc::kill(-pid, libc::SIGTERM) };
+            log("stopped the go-ios tunnel: no iPhone in use");
+        }
+        let _ = std::fs::remove_file(tunnel_pid_file());
+    }
 }
 
 /// Own process group: survives this process, and a client's Ctrl-C.

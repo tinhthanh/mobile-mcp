@@ -474,6 +474,7 @@ impl IosPhone {
                 log(&format!("stopped WebDriverAgent on {}", self.udid));
             }
             let _ = std::fs::remove_file(pid_path);
+            goios::stop_tunnel_if_unused();
         }
     }
 }

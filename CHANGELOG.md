@@ -1,5 +1,11 @@
 # Changelog
 
+## berth-mobile 0.4.2 (2026-11-23)
+
+* The go-ios tunnel berth-mobile starts stops with the last WebDriverAgent instead of running forever.
+* iPhone signing expiry (profile or certificate, whichever is first): Shipyard's status warns 30 days ahead;
+  tools say so plainly once it has run out.
+
 ## berth-mobile 0.3.0 – 0.4.1 (2026-11-22)
 
 The Node server is retired: the same tools now come from **berth-mobile**, one Rust binary (`berth-mobile/`)

@@ -40,10 +40,18 @@ pub struct Profile {
     pub prefix: String,
     pub devices: Vec<String>,
     pub expires: String,
+    /// When the profile or the certificate in it runs out, whichever is first.
+    pub expires_unix: Option<i64>,
     pub sha: String,
 }
 
 impl Profile {
+    /// Whole days until signing runs out (negative once it has).
+    pub fn days_left(&self) -> Option<i64> {
+        self.expires_unix
+            .map(|t| (t - crate::util::unix_secs() as i64).div_euclid(86_400))
+    }
+
     pub fn runner_bundle(&self) -> String {
         format!("{}.WebDriverAgentRunner.xctrunner", self.prefix)
     }
@@ -70,6 +78,17 @@ pub fn read_profile() -> Result<Profile> {
     let app_id = plist_value(&tmp, "Entitlements:application-identifier").unwrap_or_default();
     let team = plist_value(&tmp, "TeamIdentifier:0").unwrap_or_default();
     let expires = plist_value(&tmp, "ExpirationDate").unwrap_or_default();
+    let mut ex = Command::new("/usr/bin/plutil");
+    ex.args(["-extract", "ExpirationDate", "raw", "-o", "-"])
+        .arg(&tmp);
+    let profile_end = run(ex, Duration::from_secs(5), false)
+        .ok()
+        .and_then(|o| parse_iso(String::from_utf8_lossy(&o).trim()));
+    let cert_end = cert_not_after();
+    let expires_unix = match (profile_end, cert_end) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    };
     let devices = plist_value(&tmp, "ProvisionedDevices")
         .map(|s| {
             s.lines()
@@ -94,6 +113,7 @@ pub fn read_profile() -> Result<Profile> {
         prefix,
         devices,
         expires,
+        expires_unix,
         sha: sha256_hex(&bytes),
     })
 }
@@ -120,8 +140,58 @@ fn identity() -> Result<String> {
         })
 }
 
+/// Seconds since 1970 for "2027-11-22T11:19:26Z".
+fn parse_iso(s: &str) -> Option<i64> {
+    let (date, time) = s.trim_end_matches('Z').split_once('T')?;
+    let mut d = date.split('-').map(|x| x.parse::<i64>());
+    let (y, m, day) = (d.next()?.ok()?, d.next()?.ok()?, d.next()?.ok()?);
+    let mut t = time.split(':').map(|x| x.parse::<i64>());
+    let (h, mi, sec) = (t.next()?.ok()?, t.next()?.ok()?, t.next()?.ok()?);
+    // days from civil (Howard Hinnant)
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some((era * 146_097 + doe - 719_468) * 86_400 + h * 3600 + mi * 60 + sec)
+}
+
+/// The signing certificate's notAfter, from signing/dev.cer.
+fn cert_not_after() -> Option<i64> {
+    let mut c = Command::new("/usr/bin/openssl");
+    c.args(["x509", "-inform", "DER", "-noout", "-enddate", "-in"])
+        .arg(dir().join("dev.cer"));
+    let out = String::from_utf8_lossy(&run(c, Duration::from_secs(5), false).ok()?).into_owned();
+    // notAfter=Nov 22 11:06:50 2027 GMT
+    let v: Vec<&str> = out
+        .trim()
+        .strip_prefix("notAfter=")?
+        .split_whitespace()
+        .collect();
+    let first = *v.first()?;
+    let month = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ]
+    .iter()
+    .position(|m| *m == first)?
+        + 1;
+    parse_iso(&format!(
+        "{}-{:02}-{:02}T{}Z",
+        v.get(3)?,
+        month,
+        v.get(1)?.parse::<u32>().ok()?,
+        v.get(2)?
+    ))
+}
+
 /// Checks the iPhone can run WebDriverAgent signed with this profile.
 pub fn check_device(p: &Profile, udid: &str) -> Result<()> {
+    if p.days_left().is_some_and(|d| d < 0) {
+        return Err(Error::actionable(format!(
+            "berth-mobile's iPhone signing expired ({}): make a new certificate and profile in Apple Developer and put them in signing/",
+            p.expires
+        )));
+    }
     if !p.devices.iter().any(|d| d.eq_ignore_ascii_case(udid)) {
         return Err(Error::actionable(format!(
             "iPhone {udid} isn't in berth-mobile's provisioning profile: add it to the profile in Apple Developer (Certificates, IDs & Profiles) and put the new profile in signing/wda.mobileprovision"
@@ -201,5 +271,18 @@ pub fn problem() -> Option<String> {
     match read_profile() {
         Err(e) => Some(e.message),
         Ok(_) => identity().err().map(|e| e.message),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn parses_iso_dates() {
+        assert_eq!(super::parse_iso("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(
+            super::parse_iso("2027-11-22T11:19:26Z"),
+            Some(1_826_882_366)
+        );
+        assert_eq!(super::parse_iso("2000-03-01T00:00:00Z"), Some(951_868_800));
     }
 }
