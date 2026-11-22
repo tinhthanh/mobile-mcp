@@ -2,11 +2,11 @@
 # Backs up what berth-mobile needs to sign for iPhones, and PCAPdroid keys,
 # into one file encrypted with a passphrase you type: AES-256-CBC, key from
 # PBKDF2-SHA256 with 600,000 rounds and a random salt (same as vglink's
-# secrets.sh). Keep the file off this Mac (a private repo, a password
-# manager's file vault, iCloud Drive); this repository is public, so not here.
+# secrets.sh). The backup is committed as secrets/berth-mobile-signing.tar.enc;
+# this repository is public, so its safety is the passphrase's strength.
 #
 #   scripts/signing-backup.sh backup [file]   write the encrypted backup
-#                                             (default ~/Documents/berth-mobile-signing-<date>.tar.enc)
+#                                             (default secrets/berth-mobile-signing.tar.enc, replaced)
 #   scripts/signing-backup.sh verify <file>   list what the backup holds (asks the passphrase)
 #   scripts/signing-backup.sh restore <file>  put it back on a Mac and add the keychain to the search list
 #
@@ -25,8 +25,8 @@ need openssl
 
 case "${1:-}" in
 backup)
-  out="${2:-$HOME/Documents/berth-mobile-signing-$(date +%F).tar.enc}"
-  [ -e "$out" ] && { echo "$out exists; pick another name" >&2; exit 1; }
+  out="${2:-$(cd "$(dirname "$0")/.." && pwd)/secrets/berth-mobile-signing.tar.enc}"
+  mkdir -p "$(dirname "$out")"
   cd "$STATE"
   files="asc signing/berth-mobile.keychain-db signing/keychain.pass signing/dev.cer signing/wda.mobileprovision signing/AppleWWDRCAG3.cer"
   [ -f signing/dev.key ] && files="$files signing/dev.key"
