@@ -383,18 +383,27 @@ impl IosPhone {
     /// Replaces the focused field's text (Unicode ok); types at the cursor
     /// when no field reports focus.
     pub fn type_text(&mut self, text: &str) -> Result<()> {
-        let focused = self.in_session(
-            "POST",
-            "/element",
-            Some(json!({"using": "predicate string", "value": "hasKeyboardFocus == 1"})),
-        );
-        let el = focused.ok().and_then(|v| {
+        let id_of = |v: &Value| -> Option<String> {
             let e = v.get("value")?;
             e.get("ELEMENT")
                 .or_else(|| e.get("element-6066-11e4-a52e-4f735466cecf"))
                 .and_then(Value::as_str)
                 .map(String::from)
-        });
+        };
+        // the element with keyboard focus; the predicate is a fallback for older WDAs
+        let el = self
+            .in_session("GET", "/element/active", None)
+            .ok()
+            .and_then(|v| id_of(&v))
+            .or_else(|| {
+                self.in_session(
+                    "POST",
+                    "/element",
+                    Some(json!({"using": "predicate string", "value": "hasKeyboardFocus == 1"})),
+                )
+                .ok()
+                .and_then(|v| id_of(&v))
+            });
         match el {
             Some(id) => {
                 self.in_session("POST", &format!("/element/{id}/clear"), None)?;
