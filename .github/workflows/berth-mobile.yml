@@ -27,22 +27,22 @@ env:
 
 jobs:
   test:
-    runs-on: macos-15
+    runs-on: macos-15-intel
     defaults: { run: { working-directory: berth-mobile } }
     steps:
       - uses: actions/checkout@v4
-      - run: rustup toolchain install stable --profile minimal -c clippy -t x86_64-apple-darwin
+      - run: rustup toolchain install stable --profile minimal -c clippy -t x86_64-apple-darwin -t aarch64-apple-darwin
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
 
   release:
     if: startsWith(github.ref, 'refs/tags/mobile-v')
     needs: test
-    runs-on: macos-15
+    runs-on: macos-15-intel
     defaults: { run: { working-directory: berth-mobile } }
     steps:
       - uses: actions/checkout@v4
-      - run: rustup toolchain install stable --profile minimal -t x86_64-apple-darwin
+      - run: rustup toolchain install stable --profile minimal -t x86_64-apple-darwin -t aarch64-apple-darwin
       - name: Tag matches Cargo.toml
         run: |
           v=$(awk -F'"' '/^version =/ { print $2; exit }' Cargo.toml)
