@@ -24,17 +24,17 @@ Cần Rust (https://rustup.rs) và Xcode Command Line Tools. Script build berth-
 Bật Tuỳ chọn nhà phát triển (bấm 7 lần vào Số hiệu bản dựng) và Gỡ lỗi USB, cắm cáp dữ liệu, bấm **Cho phép**
 (nên tick *Luôn cho phép*). `devices` báo `unauthorized` khi chưa cho phép.
 
-## iPhone (làm một lần cho mỗi Mac)
+## iPhone
 
-1. iPhone: cắm cáp, bấm **Tin cậy**, bật **Cài đặt → Quyền riêng tư & Bảo mật → Chế độ nhà phát triển**.
-2. Mac: cần bộ ký của team Apple Developer trong `~/Library/Application Support/berth-mobile/signing/`
-   (keychain + profile có UDID của iPhone). Có bản sao lưu thì khôi phục:
-   `berth-mobile/scripts/signing-backup.sh restore berth-mobile/secrets/berth-mobile-signing.tar.enc`
-3. iPhone mới: thêm UDID vào profile "berth-mobile WDA" trên developer.apple.com, tải profile về thay
-   `signing/wda.mobileprovision`.
+Plugin đã kèm sẵn WebDriverAgent ký cho các iPhone của team: Mac nào cũng **không cần** khoá hay mã nguồn.
 
-Lần dùng đầu plugin tự tải go-ios, ký và cài WebDriverAgent, mount developer image (10–60 giây). Giữ iPhone mở
-khoá khi agent làm việc: khi khoá, agent sẽ dừng và nhờ người mở.
+1. iPhone: cắm cáp, mở khoá, bấm **Tin cậy**, bật **Cài đặt → Quyền riêng tư & Bảo mật → Chế độ nhà phát triển**.
+2. Lần dùng đầu plugin tự tải go-ios, cài WebDriverAgent, mount developer image (10–60 giây). Giữ iPhone mở
+   khoá khi agent làm việc: khi khoá, agent sẽ dừng và nhờ người mở.
+3. **iPhone mới** (chưa có trong profile): `devices` báo *not usable … isn't in berth-mobile's provisioning
+   profile*. Thêm UDID vào profile "berth-mobile WDA" trên developer.apple.com, rồi trên máy giữ bộ ký:
+   tải profile mới vào `signing/wda.mobileprovision`, chạy `berth-mobile/scripts/signing-backup.sh backup`,
+   commit, và tag bản phát hành mới — CI tự ký lại.
 
 ## Xem và điều khiển điện thoại Android trên Mac
 

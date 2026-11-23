@@ -60,7 +60,7 @@ pub struct State {
 
 /// iPhones attached, when this computer is set up to sign for them.
 fn ios_devices() -> Vec<String> {
-    if crate::signing::read_profile().is_err() {
+    if !crate::signing::available() {
         return Vec::new();
     }
     crate::goios::list().unwrap_or_else(|e| {
@@ -702,25 +702,30 @@ impl State {
     fn devices_text() -> Result<String> {
         let listed = adb::list_devices().unwrap_or_default();
         let mut iphones = Vec::new();
-        if crate::goios::present() || crate::signing::read_profile().is_ok() {
+        if crate::goios::present() || crate::signing::available() {
             for udid in crate::goios::list().unwrap_or_default() {
                 let (model, version) = crate::goios::product(&udid).unwrap_or_default();
                 let mut line = format!("{udid} {model} ios{version}");
-                if let Some(problem) = crate::signing::read_profile()
-                    .err()
-                    .map(|e| e.message)
-                    .or_else(|| {
-                        crate::signing::read_profile().ok().and_then(|p| {
-                            crate::signing::check_device(&p, &udid)
-                                .err()
-                                .map(|e| e.message)
-                        })
-                    })
-                {
+                if let Some(problem) = match crate::signing::current_profile() {
+                    Err(e) => Some(e.message),
+                    Ok((p, _)) => crate::signing::check_device(&p, &udid)
+                        .err()
+                        .map(|e| e.message),
+                } {
                     line.push_str(&format!(" (not usable: {problem})"));
                 }
                 iphones.push(line);
             }
+        }
+        // an iPhone on the cable that go-ios can't list (no signing set up here,
+        // not trusted, locked): say what is missing instead of nothing
+        let on_usb = crate::goios::usb_count();
+        if on_usb > iphones.len() {
+            let why = match crate::signing::current_profile() {
+                Err(e) => e.message,
+                Ok(_) => "unlock it and tap Trust on the iPhone, or replug the cable".to_string(),
+            };
+            iphones.push(format!("iPhone on USB, not usable: {why}"));
         }
         if listed.is_empty() && iphones.is_empty() {
             return Ok(

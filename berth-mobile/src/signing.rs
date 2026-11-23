@@ -8,6 +8,11 @@
 //!   (`TEAM.prefix.*`) that lists the iPhones.
 //!
 //! Appium's unsigned WebDriverAgent build (pinned) is re-signed with them.
+//!
+//! Other Macs need none of that: the plugin can ship WebDriverAgent already
+//! signed (`wda-signed.zip` beside `bin/`, made by `sign-wda` in the release
+//! build), checked against a SHA-256 compiled into this binary. Signing
+//! material on this Mac, when there is some, wins.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -65,15 +70,20 @@ fn plist_value(plist: &Path, key: &str) -> Option<String> {
         .map(|o| String::from_utf8_lossy(&o).trim().to_string())
 }
 
+/// The provisioning profile on this Mac (signing/wda.mobileprovision).
 pub fn read_profile() -> Result<Profile> {
-    let path = profile_path();
-    let bytes = std::fs::read(&path).map_err(|_| {
+    read_profile_at(&profile_path(), Some(&dir().join("dev.cer"))).map_err(|_| {
         Error::actionable("iPhone signing isn't set up on this computer (no signing/wda.mobileprovision in berth-mobile's state folder)")
-    })?;
+    })
+}
+
+/// A provisioning profile, with the certificate's expiry when `cert` is given.
+fn read_profile_at(path: &Path, cert: Option<&Path>) -> Result<Profile> {
+    let bytes = std::fs::read(path)?;
     let tmp =
         std::env::temp_dir().join(format!("berth-mobile-profile-{}.plist", std::process::id()));
     let mut cmd = Command::new("/usr/bin/security");
-    cmd.args(["cms", "-D", "-i"]).arg(&path).arg("-o").arg(&tmp);
+    cmd.args(["cms", "-D", "-i"]).arg(path).arg("-o").arg(&tmp);
     run(cmd, Duration::from_secs(10), false)?;
     let app_id = plist_value(&tmp, "Entitlements:application-identifier").unwrap_or_default();
     let team = plist_value(&tmp, "TeamIdentifier:0").unwrap_or_default();
@@ -84,7 +94,7 @@ pub fn read_profile() -> Result<Profile> {
     let profile_end = run(ex, Duration::from_secs(5), false)
         .ok()
         .and_then(|o| parse_iso(String::from_utf8_lossy(&o).trim()));
-    let cert_end = cert_not_after();
+    let cert_end = cert.and_then(cert_not_after);
     let expires_unix = match (profile_end, cert_end) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
@@ -157,10 +167,10 @@ fn parse_iso(s: &str) -> Option<i64> {
 }
 
 /// The signing certificate's notAfter, from signing/dev.cer.
-fn cert_not_after() -> Option<i64> {
+fn cert_not_after(cert: &Path) -> Option<i64> {
     let mut c = Command::new("/usr/bin/openssl");
     c.args(["x509", "-inform", "DER", "-noout", "-enddate", "-in"])
-        .arg(dir().join("dev.cer"));
+        .arg(cert);
     let out = String::from_utf8_lossy(&run(c, Duration::from_secs(5), false).ok()?).into_owned();
     // notAfter=Nov 22 11:06:50 2027 GMT
     let v: Vec<&str> = out
@@ -269,9 +279,119 @@ pub fn signed_wda(p: &Profile) -> Result<PathBuf> {
 /// For `status`: None when signing is ready, else what is missing.
 pub fn problem() -> Option<String> {
     match read_profile() {
-        Err(e) => Some(e.message),
         Ok(_) => identity().err().map(|e| e.message),
+        Err(e) if bundled_zip().is_none() => Some(e.message),
+        Err(_) => None,
     }
+}
+
+/// WebDriverAgent ready to install: the app, its bundle id and its profile.
+pub struct Wda {
+    pub app: PathBuf,
+    pub bundle: String,
+    pub profile: Profile,
+    /// "local" (signed on this Mac) or "bundled" (shipped signed in the plugin)
+    pub source: &'static str,
+}
+
+/// The SHA-256 of the signed WebDriverAgent this build ships with, if any.
+const BUNDLED_SHA256: Option<&str> = option_env!("BERTH_MOBILE_WDA_SHA256");
+
+/// The plugin's signed WebDriverAgent, when this build ships one and the
+/// file beside `bin/` is it.
+fn bundled_zip() -> Option<PathBuf> {
+    let want = BUNDLED_SHA256.filter(|s| !s.is_empty())?;
+    let dir = std::env::var_os("BERTH_PLUGIN_DIR")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()?
+                .parent()?
+                .parent()
+                .map(Path::to_path_buf)
+        })?;
+    let zip = dir.join("wda-signed.zip");
+    (crate::fetch::file_sha256(&zip).ok()? == want).then_some(zip)
+}
+
+/// Unpacks the bundled, signed WebDriverAgent (once) and reads what it carries.
+fn bundled() -> Result<Wda> {
+    let zip = bundled_zip().ok_or_else(|| {
+        Error::actionable(
+            "iPhone signing isn't set up on this computer and this plugin build ships no signed WebDriverAgent",
+        )
+    })?;
+    let sha = BUNDLED_SHA256.unwrap_or_default();
+    let out = crate::paths::cache_dir()
+        .join("wda")
+        .join(format!("bundled-{}", &sha[..16]));
+    let app = out.join("WebDriverAgentRunner-Runner.app");
+    if !app.join("embedded.mobileprovision").is_file() {
+        let _ = std::fs::remove_dir_all(&out);
+        crate::paths::ensure_private(&out)?;
+        let mut unzip = Command::new("/usr/bin/ditto");
+        unzip.arg("-x").arg("-k").arg(&zip).arg(&out);
+        run(unzip, Duration::from_secs(60), false)?;
+    }
+    let profile = read_profile_at(&app.join("embedded.mobileprovision"), None)?;
+    let bundle = plist_value(&app.join("Info.plist"), "CFBundleIdentifier")
+        .filter(|b| !b.is_empty())
+        .unwrap_or_else(|| profile.runner_bundle());
+    Ok(Wda {
+        app,
+        bundle,
+        profile,
+        source: "bundled",
+    })
+}
+
+/// The profile WebDriverAgent will be signed with: this Mac's, else the
+/// bundled app's. For status and device checks, without signing anything.
+pub fn current_profile() -> Result<(Profile, &'static str)> {
+    match read_profile() {
+        Ok(p) => Ok((p, "local")),
+        Err(e) => bundled().map(|w| (w.profile, w.source)).map_err(|_| e),
+    }
+}
+
+/// Whether iPhones can be used here at all.
+pub fn available() -> bool {
+    read_profile().is_ok() || bundled_zip().is_some()
+}
+
+/// WebDriverAgent to install: signed here when this Mac has signing
+/// material, else the one the plugin ships.
+pub fn prepared_wda() -> Result<Wda> {
+    match read_profile() {
+        Ok(p) => {
+            let app = signed_wda(&p)?;
+            Ok(Wda {
+                app,
+                bundle: p.runner_bundle(),
+                profile: p,
+                source: "local",
+            })
+        }
+        Err(_) => bundled(),
+    }
+}
+
+/// `sign-wda <out.zip>`: signs WebDriverAgent with this Mac's signing
+/// material and zips it for a plugin build to ship.
+pub fn sign_to_zip(out: &Path) -> Result<()> {
+    let p = read_profile()?;
+    let app = signed_wda(&p)?;
+    let _ = std::fs::remove_file(out);
+    let mut zip = Command::new("/usr/bin/ditto");
+    zip.args(["-c", "-k", "--keepParent"]).arg(&app).arg(out);
+    run(zip, Duration::from_secs(120), false)?;
+    log(&format!(
+        "wrote {} ({} iPhones, expires {})",
+        out.display(),
+        p.devices.len(),
+        p.expires
+    ));
+    Ok(())
 }
 
 #[cfg(test)]

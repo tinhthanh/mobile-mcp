@@ -1,5 +1,13 @@
 # Changelog
 
+## berth-mobile 0.4.3 (2026-11-24)
+
+* iPhones on any Mac without keys: the plugin ships WebDriverAgent signed once, in the release build
+  (`berth-mobile sign-wda`; CI decrypts the signing backup with the `BERTH_MOBILE_SIGNING_PASSPHRASE` secret),
+  checked against a SHA-256 compiled into the binary. Local signing material still wins where present.
+* `devices` and Shipyard's status say when an iPhone is on USB but not usable here, and why (found through
+  `ioreg`, without go-ios or signing).
+
 ## berth-mobile 0.4.2 (2026-11-23)
 
 * The go-ios tunnel berth-mobile starts stops with the last WebDriverAgent instead of running forever.
