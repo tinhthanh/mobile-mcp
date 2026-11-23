@@ -4,6 +4,8 @@
 //!   berth-mobile setup          fetch adb if needed, install UiAutomator2 on connected phones
 //!   berth-mobile status --json  whether setup is done, for Shipyard
 //!   berth-mobile settings --json  the switches Shipyard shows
+//!   berth-mobile sign-wda <out.zip>  sign WebDriverAgent with this Mac's signing
+//!                               material, for a plugin build to ship
 //!   berth-mobile version
 
 mod adb;
@@ -36,6 +38,16 @@ fn main() {
         "setup" => std::process::exit(setup()),
         "status" => println!("{}", status()),
         "settings" => println!("{}", settings::list_json()),
+        "sign-wda" => {
+            let Some(out) = args.get(1) else {
+                eprintln!("usage: berth-mobile sign-wda <out.zip>");
+                std::process::exit(2);
+            };
+            if let Err(e) = signing::sign_to_zip(std::path::Path::new(out)) {
+                eprintln!("sign-wda: {e}");
+                std::process::exit(1);
+            }
+        }
         "version" | "--version" | "-V" => println!("berth-mobile {}", env!("CARGO_PKG_VERSION")),
         other => {
             eprintln!("unknown command {other:?}; see the top of src/main.rs");
@@ -110,7 +122,8 @@ fn status() -> Value {
         _ => vec![],
     };
     // iPhones: only when go-ios is here already (status downloads nothing)
-    let profile = signing::read_profile();
+    let current = signing::current_profile();
+    let profile = current.as_ref().map(|(p, _)| p);
     let mut iphones = Vec::new();
     if goios::present() {
         for udid in goios::list().unwrap_or_default() {
@@ -144,15 +157,25 @@ fn status() -> Value {
             format!("Chứng chỉ / provisioning profile ký iPhone hết hạn sau {days} ngày: tạo lại trên Apple Developer")
         });
     }
+    // an iPhone macOS sees but go-ios doesn't list (or isn't fetched yet)
+    let on_usb = goios::usb_count();
+    if on_usb > iphones.len() {
+        problems.push(match &profile {
+            Err(_) => "Có iPhone cắm vào nhưng máy này chưa có bộ ký WebDriverAgent: khôi phục bằng berth-mobile/scripts/signing-backup.sh restore".to_string(),
+            Ok(_) if !goios::present() => "Có iPhone cắm vào: bấm Set up… để tải go-ios và cài WebDriverAgent".to_string(),
+            Ok(_) => "Có iPhone cắm vào nhưng chưa kết nối được: mở khoá, bấm Tin cậy trên iPhone, hoặc cắm lại cáp".to_string(),
+        });
+    }
     json!({
         "ready": problems.is_empty(),
+        "iphonesOnUsb": on_usb,
         "problem": problems,
         "adb": adb.map(|p| p.display().to_string()),
         "adbVersion": version,
         "phones": phones,
         "iphones": iphones,
         "iosSigning": match &profile {
-            Ok(p) => json!({"team": p.team, "appId": format!("{}.*", p.prefix), "devices": p.devices.len(), "expires": p.expires, "daysLeft": p.days_left(), "identity": signing::problem().unwrap_or_else(|| "ok".into())}),
+            Ok(p) => json!({"source": current.as_ref().map(|(_, s)| *s).unwrap_or(""), "team": p.team, "appId": format!("{}.*", p.prefix), "devices": p.devices.len(), "expires": p.expires, "daysLeft": p.days_left(), "identity": signing::problem().unwrap_or_else(|| "ok".into())}),
             Err(e) => json!(e.message),
         },
         "settings": settings::list_json()["settings"],
@@ -205,17 +228,17 @@ fn setup() -> i32 {
         Err(e) => util::log(&format!("setup: adb devices failed: {e}")),
     }
     // iPhones, when this computer signs for them
-    if let Ok(profile) = signing::read_profile() {
-        let prepared = goios::binary().and_then(|_| signing::signed_wda(&profile));
+    if signing::available() {
+        let prepared = goios::binary().and_then(|_| signing::prepared_wda());
         match prepared {
             Err(e) => {
                 util::log(&format!("setup: iOS: {e}"));
                 failed = true;
             }
-            Ok(app) => {
+            Ok(wda) => {
                 for udid in goios::list().unwrap_or_default() {
-                    let r = signing::check_device(&profile, &udid)
-                        .and_then(|_| goios::install(&udid, &app))
+                    let r = signing::check_device(&wda.profile, &udid)
+                        .and_then(|_| goios::install(&udid, &wda.app))
                         .and_then(|_| goios::ensure_image(&udid));
                     match r {
                         Ok(()) => util::log(&format!(

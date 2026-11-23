@@ -74,6 +74,22 @@ pub fn ios(udid: Option<&str>, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&out).into_owned())
 }
 
+/// How many iPhones/iPads macOS sees on USB (Apple vendor id), whether or
+/// not go-ios or signing is set up: enough to say what is missing.
+pub fn usb_count() -> usize {
+    let mut cmd = Command::new("/usr/sbin/ioreg");
+    cmd.args(["-p", "IOUSB", "-l", "-w0"]);
+    let out = run(cmd, Duration::from_secs(10), false)
+        .map(|o| String::from_utf8_lossy(&o).into_owned())
+        .unwrap_or_default();
+    out.lines()
+        .filter(|l| {
+            l.contains("\"USB Product Name\"")
+                && (l.contains("\"iPhone\"") || l.contains("\"iPad\""))
+        })
+        .count()
+}
+
 /// UDIDs of the iPhones attached over USB.
 pub fn list() -> Result<Vec<String>> {
     let out = ios(None, &["list"])?;

@@ -114,9 +114,9 @@ impl IosPhone {
                 return Ok(());
             }
         }
-        let profile = signing::read_profile()?;
+        let (profile, _) = signing::current_profile()?;
         signing::check_device(&profile, &self.udid)?;
-        let bundle = profile.runner_bundle();
+        let mut bundle = profile.runner_bundle();
         let pid_path = pid_file(&self.udid);
         let running = std::fs::read_to_string(&pid_path)
             .ok()
@@ -128,6 +128,8 @@ impl IosPhone {
             let marker = crate::paths::run_dir()
                 .join(&self.udid)
                 .join("wda.installed");
+            let wda = signing::prepared_wda()?;
+            bundle = wda.bundle.clone();
             let installed = std::fs::read_to_string(&marker).is_ok_and(|s| s.trim() == profile.sha)
                 && goios::apps(&self.udid, false)?.contains(&bundle);
             if !installed {
@@ -136,9 +138,11 @@ impl IosPhone {
                         "WebDriverAgent isn't installed on this iPhone and auto-install is off (Shipyard → Settings → Plugins → Mobile)",
                     ));
                 }
-                let app = signing::signed_wda(&profile)?;
-                log(&format!("installing WebDriverAgent on {}", self.udid));
-                goios::install(&self.udid, &app)?;
+                log(&format!(
+                    "installing WebDriverAgent ({}) on {}",
+                    wda.source, self.udid
+                ));
+                goios::install(&self.udid, &wda.app)?;
                 std::fs::write(&marker, &profile.sha)?;
             }
             goios::ensure_image(&self.udid)?;

@@ -5,7 +5,10 @@
 # publishes it on the public tinhthanh/vetgo-releases as mobile-v<version>:
 # mobile-<version>.tar.gz and its .sha256, ready for Shipyard's Install from URL.
 #
-# Secret: RELEASES_TOKEN, a token that may write releases on tinhthanh/vetgo-releases.
+# Secrets: RELEASES_TOKEN, a token that may write releases on tinhthanh/vetgo-releases;
+# BERTH_MOBILE_SIGNING_PASSPHRASE, the passphrase of secrets/berth-mobile-signing.tar.enc:
+# the release decrypts it into a throwaway state folder and keychain so package.sh
+# ships WebDriverAgent signed for the team's iPhones (without it, the plugin ships none).
 name: berth-mobile
 
 on:
@@ -45,10 +48,31 @@ jobs:
           v=$(awk -F'"' '/^version =/ { print $2; exit }' Cargo.toml)
           [ "mobile-v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME but Cargo.toml says $v"; exit 1; }
           echo "VERSION=$v" >> "$GITHUB_ENV"
+      - name: iPhone signing (decrypt the backup into a throwaway keychain)
+        env: { PASS: "${{ secrets.BERTH_MOBILE_SIGNING_PASSPHRASE }}" }
+        run: |
+          if [ -z "$PASS" ]; then
+            echo "::warning::BERTH_MOBILE_SIGNING_PASSPHRASE is not set: this release ships no signed WebDriverAgent"
+            exit 0
+          fi
+          state="$RUNNER_TEMP/berth-mobile-state"
+          mkdir -p "$state" && chmod 700 "$state"
+          openssl enc -d -aes-256-cbc -md sha256 -pbkdf2 -iter 600000 -pass env:PASS \
+            -in secrets/berth-mobile-signing.tar.enc | tar -xzf - -C "$state"
+          kc="$state/signing/berth-mobile.keychain-db"
+          # codesign only looks in the search list: keep the runner's keychains, add ours
+          security list-keychains -d user -s $(security list-keychains -d user | tr -d '"') "$kc"
+          security unlock-keychain -p "$(cat "$state/signing/keychain.pass")" "$kc"
+          security set-keychain-settings "$kc"
+          security find-identity -v -p codesigning "$kc" | tail -1
+          echo "BERTH_MOBILE_HOME=$state" >> "$GITHUB_ENV"
       - run: scripts/package.sh
+      - name: Forget the signing material
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/berth-mobile-state"
       - name: Publish on vetgo-releases
         env: { GH_TOKEN: "${{ secrets.RELEASES_TOKEN }}" }
         run: |
           gh release create "mobile-v$VERSION" dist/mobile-$VERSION.tar.gz dist/mobile-$VERSION.tar.gz.sha256 \
             -R "$RELEASES_REPO" --title "mobile $VERSION" \
-            --notes "Shipyard plugin \"mobile\" (berth-mobile $VERSION, macOS universal): agents drive an Android phone over USB. Install: Shipyard → Settings → Plugins → Install from URL → https://github.com/$RELEASES_REPO/releases/download/mobile-v$VERSION/mobile-$VERSION.tar.gz (the .sha256 beside it is picked up)."
+            --notes "Shipyard plugin \"mobile\" (berth-mobile $VERSION, macOS universal): agents drive an Android phone or an iPhone over USB (WebDriverAgent ships signed for the team's iPhones). Install: Shipyard → Settings → Plugins → Install from URL → https://github.com/$RELEASES_REPO/releases/download/mobile-v$VERSION/mobile-$VERSION.tar.gz (the .sha256 beside it is picked up)."

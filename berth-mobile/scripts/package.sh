@@ -8,6 +8,11 @@
 # The manifest pins the binary and the skill by SHA-256; everything else the
 # plugin uses (adb, UiAutomator2, PCAPdroid) is fetched at run time against
 # hashes compiled into the binary.
+#
+# iPhones: when this Mac has signing material (berth-mobile's signing/, or
+# $BERTH_MOBILE_HOME/signing in CI), WebDriverAgent is signed here and shipped
+# as wda-signed.zip, its SHA-256 compiled into the binary, so other Macs need
+# no keys. WDA_SIGNED=<zip> ships a zip signed elsewhere.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,6 +22,22 @@ export PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$HOME/.car
 VERSION=$(awk -F'"' '/^version =/ { print $2; exit }' Cargo.toml)
 OUT="$ROOT/dist/mobile"
 rm -rf "$OUT" && mkdir -p "$OUT/bin" "$OUT/skills/berth-mobile"
+
+sha() { shasum -a 256 "$1" | awk '{ print $1 }'; }
+SIGN_HOME="${BERTH_MOBILE_HOME:-$HOME/Library/Application Support/berth-mobile}"
+unset BERTH_MOBILE_WDA_SHA256
+WDA_ZIP="${WDA_SIGNED:-}"
+if [ -z "$WDA_ZIP" ] && [ -f "$SIGN_HOME/signing/wda.mobileprovision" ]; then
+	cargo build --release --locked
+	WDA_ZIP="$ROOT/dist/wda-signed.zip"
+	target/release/berth-mobile sign-wda "$WDA_ZIP"
+fi
+if [ -n "$WDA_ZIP" ]; then
+	export BERTH_MOBILE_WDA_SHA256="$(sha "$WDA_ZIP")"
+	echo "shipping signed WebDriverAgent $BERTH_MOBILE_WDA_SHA256"
+else
+	echo "warning: no iPhone signing here: this build ships no signed WebDriverAgent" >&2
+fi
 
 for t in aarch64-apple-darwin x86_64-apple-darwin; do
 	cargo build --release --locked --target "$t"
@@ -29,9 +50,9 @@ xcrun strip -x "$OUT/bin/berth-mobile"
 codesign --force --sign - "$OUT/bin/berth-mobile"
 
 cp plugin/skills/berth-mobile/SKILL.md "$OUT/skills/berth-mobile/SKILL.md"
+[ -n "$WDA_ZIP" ] && cp "$WDA_ZIP" "$OUT/wda-signed.zip"
 cp ../LICENSE "$OUT/LICENSE"
 
-sha() { shasum -a 256 "$1" | awk '{ print $1 }'; }
 BIN_SHA=$(sha "$OUT/bin/berth-mobile")
 SKILL_SHA=$(sha "$OUT/skills/berth-mobile/SKILL.md")
 

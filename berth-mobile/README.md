@@ -66,33 +66,37 @@ Environment: `BERTH_MOBILE_ADB` (adb to use), `BERTH_MOBILE_HOME`,
 
 ## iPhone
 
-iOS runs nothing that isn't signed for the device, so an iPhone needs, once
-per Mac, an Apple Developer team's signing material in
-`~/Library/Application Support/berth-mobile/signing/`:
+The plugin ships **WebDriverAgent already signed** for the team's iPhones
+(`wda-signed.zip`, its SHA-256 compiled into the binary): on any Mac, plugging
+in a trusted iPhone with Developer Mode on is enough. berth-mobile fetches
+go-ios 1.3.2 (MIT, pinned) and the iOS 17+ developer disk image (pinned; the
+phone mounts it only with Apple's TSS signature), installs WebDriverAgent,
+starts go-ios's userspace tunnel (no root) and runs WebDriverAgent with
+`USE_IP=127.0.0.1`: it listens on the phone's loopback only, reached through
+`ios forward` over the cable, never on Wi-Fi. WebDriverAgent and the tunnel
+stop when no process used the phone for 5 minutes.
 
-- `berth-mobile.keychain-db` + `keychain.pass` — an Apple Development identity
-  whose key was made on this Mac, in a keychain of its own (added to the end
-  of the user's keychain search list: `codesign` only looks there);
-- `wda.mobileprovision` — a development profile for a wildcard App ID
-  (`TEAM.prefix.*`) listing the iPhones.
+Signing happens once, in the release build: CI decrypts
+`secrets/berth-mobile-signing.tar.enc` with the `BERTH_MOBILE_SIGNING_PASSPHRASE`
+secret into a throwaway keychain and `scripts/package.sh` runs
+`berth-mobile sign-wda`. A Mac that has its own signing material in
+`~/Library/Application Support/berth-mobile/signing/` (an Apple Development
+identity in `berth-mobile.keychain-db` + `keychain.pass`, and
+`wda.mobileprovision` for a wildcard App ID) signs locally instead.
 
-The iPhone must trust the Mac and have Developer Mode on. Then, on first use,
-berth-mobile fetches go-ios 1.3.2 (MIT, pinned), Appium's WebDriverAgent
-16.15.3 (BSD, pinned, re-signed as `prefix.WebDriverAgentRunner.xctrunner`) and
-the iOS 17+ developer disk image (pinned; the phone mounts it only with
-Apple's TSS signature), installs WebDriverAgent, starts go-ios's userspace
-tunnel (no root) and runs WebDriverAgent with `USE_IP=127.0.0.1`: it listens
-on the phone's loopback only, reached through `ios forward` over the cable,
-never on Wi-Fi. It stops when no process used the phone for 5 minutes.
+**A new iPhone**: add its UDID to the "berth-mobile WDA" profile in Apple
+Developer, put the new profile in `signing/wda.mobileprovision`, back it up
+(`scripts/signing-backup.sh backup`, commit) and tag a release. Same when the
+profile or certificate nears its expiry (status warns 30 days ahead).
+
+An App Store Connect API key with the Developer role can read devices and
+create certificates but not App IDs or profiles: make those in the Apple
+Developer site (Certificates, IDs & Profiles).
 
 The screen is read from WebDriverAgent's XML source without the `visible` and
 `accessible` attributes, which XCTest computes element by element (a home
 screen: 0.6 s instead of 8 s); hidden elements are dropped by their frame
 instead. `BERTH_MOBILE_IOS_JSON=1` reads the full JSON tree, for comparing.
-
-An App Store Connect API key with the Developer role can read devices and
-create certificates but not App IDs or profiles: make those in the Apple
-Developer site (Certificates, IDs & Profiles).
 
 ## Not yet
 
