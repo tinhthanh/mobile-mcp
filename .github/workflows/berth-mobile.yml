@@ -3,7 +3,8 @@
 # Pushes and pull requests that touch it run the tests. A tag mobile-v<version>
 # (matching berth-mobile/Cargo.toml) also builds the universal macOS plugin and
 # publishes it on the public tinhthanh/vetgo-releases as mobile-v<version>:
-# mobile-<version>.tar.gz and its .sha256, ready for Shipyard's Install from URL.
+# mobile-<version>.tar.gz (and the same as mobile-<version>-darwin-universal.tar.gz,
+# which Vetgo's plugin listing reads) with their .sha256, ready for Install from URL.
 #
 # Secrets: RELEASES_TOKEN, a token that may write releases on tinhthanh/vetgo-releases;
 # BERTH_MOBILE_SIGNING_PASSPHRASE, the passphrase of secrets/berth-mobile-signing.tar.enc:
@@ -73,6 +74,11 @@ jobs:
       - name: Publish on vetgo-releases
         env: { GH_TOKEN: "${{ secrets.RELEASES_TOKEN }}" }
         run: |
-          gh release create "mobile-v$VERSION" dist/mobile-$VERSION.tar.gz dist/mobile-$VERSION.tar.gz.sha256 \
+          # Also named for what it runs on, so Vetgo's plugin listing offers it
+          # to Macs only (vetgo-releases' scripts/plugin-registry.py).
+          mac="mobile-$VERSION-darwin-universal.tar.gz"
+          cp "dist/mobile-$VERSION.tar.gz" "dist/$mac"
+          (cd dist && shasum -a 256 "$mac" > "$mac.sha256")
+          gh release create "mobile-v$VERSION" dist/mobile-$VERSION.tar.gz dist/mobile-$VERSION.tar.gz.sha256 "dist/$mac" "dist/$mac.sha256" \
             -R "$RELEASES_REPO" --title "mobile $VERSION" \
             --notes "Shipyard plugin \"mobile\" (berth-mobile $VERSION, macOS universal): agents drive an Android phone or an iPhone over USB (WebDriverAgent ships signed for the team's iPhones). Install: Shipyard → Settings → Plugins → Install from URL → https://github.com/$RELEASES_REPO/releases/download/mobile-v$VERSION/mobile-$VERSION.tar.gz (the .sha256 beside it is picked up)."
