@@ -50,6 +50,8 @@ xcrun strip -x "$OUT/bin/berth-mobile"
 codesign --force --sign - "$OUT/bin/berth-mobile"
 
 cp plugin/skills/berth-mobile/SKILL.md "$OUT/skills/berth-mobile/SKILL.md"
+# Its icon in Settings → Plugins (Vetgo; Shipyard ignores it).
+cp plugin/icon.svg "$OUT/icon.svg"
 [ -n "$WDA_ZIP" ] && cp "$WDA_ZIP" "$OUT/wda-signed.zip"
 cp ../LICENSE "$OUT/LICENSE"
 
@@ -62,6 +64,7 @@ cat > "$OUT/berth-plugin.json" <<EOF
   "name": "Mobile",
   "version": "$VERSION",
   "description": "Lets agents use an Android phone or an iPhone plugged in over USB: read the screen as compact text, tap, type (Vietnamese ok), swipe, and on Android capture an app's network traffic (berth-mobile $VERSION, darwin-universal).",
+  "icon": "icon.svg",
   "author": "tinhthanh",
   "homepage": "https://github.com/tinhthanh/mobile-mcp",
   "mcp": {
