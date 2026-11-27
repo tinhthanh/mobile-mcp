@@ -17,6 +17,7 @@ How to work:
 - `swipe up` reveals items below the fold; `tap <text>` fails fast with the current screen when the item is not visible.
 - Use `screen {ocr:true}` for games/canvas and `screen {image:true}` only when the check is visual (layout, colors). Images cost far more tokens.
 - iPhone: `app` takes bundle ids (com.apple.Preferences); there is no BACK key, tap the app's back button; if the screen says locked, stop and ask the person to unlock. `net` is Android only.
+- Device `mirroring` (iPhone through the Mac's iPhone Mirroring, OCR): every line is `*`, expect small OCR typos. `app launch` takes the Home Screen name ("Cài đặt"), opens Spotlight and stops: tap the app's own result under "Kết quả phù hợp nhất"/"Top Hit", never a message or web suggestion. Keys: HOME, ENTER only. `type` pastes (~2.5 s). A system alert (e.g. low battery) blocks taps: dismiss it with its neutral button ("Đóng"/"Close"). `unchanged` after an action that should change the screen: stop and ask the person to quit and reopen iPhone Mirroring; don't retry in a loop.
 - Network: `net start` (or `net start {app}` for apps that ignore the proxy, hosts only), exercise the app, `net list`, `net show {id}` for one request; always `net stop` before you finish.
 
 Safety:
