@@ -14,6 +14,7 @@ mod goios;
 mod ios;
 mod lock;
 mod mcp;
+mod mirroring;
 mod net;
 mod ocr;
 mod paths;
