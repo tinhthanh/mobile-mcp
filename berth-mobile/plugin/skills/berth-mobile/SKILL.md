@@ -50,6 +50,24 @@ minutes for them and then says the phone is busy.
   unlock it. Never try to enter the passcode.
 - `net` is Android only.
 
+### Through iPhone Mirroring (device `mirroring`)
+
+A fallback the person turns on in Shipyard, for an iPhone WebDriverAgent
+can't reach. It works the Mac's own iPhone Mirroring window:
+
+- The screen is read by OCR: every line is marked `*` (OCR can't tell a
+  button from a label) and there are no flags. Expect small OCR typos.
+- `app {action:"launch", package:"<app name as on the Home Screen>"}` (a
+  name, not a bundle id) opens Spotlight and types it, then stops: tap the
+  app's own result (under "Kết quả phù hợp nhất" / "Top Hit"), never a
+  message or web suggestion. `list` and `stop` don't exist here.
+- `type` pastes through the shared clipboard (any language), about 2.5 s.
+- Keys: HOME and ENTER only. Swipes move the Mac's pointer for a moment.
+- "unchanged" after an action that should have changed the screen: iPhone
+  Mirroring stopped passing input on. Ask the person to quit it (⌘Q) and
+  open it again; don't retry in a loop.
+- While you act the person shouldn't use the Mac's mouse or keyboard.
+
 ## Network
 
 `net` works only when the person turned on "net" for the mobile plugin in

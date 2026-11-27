@@ -391,7 +391,7 @@ impl State {
     fn list_apps(&mut self, id: &str) -> Result<Vec<String>> {
         if is_mirror(id) {
             actionable!(
-                "iPhone Mirroring can't list apps: launch one by its name (app launch \"Settings\")"
+                "iPhone Mirroring can't list apps: launch one by its Home Screen name (app launch \"Cài đặt\"), then tap its Spotlight result"
             );
         }
         if self.is_ios(id)? {
@@ -510,6 +510,9 @@ impl State {
     /// "unchanged" when the screen is what the agent saw last.
     fn report(&mut self, id: &str, text: String) -> String {
         if self.last_screen.get(id) == Some(&text) {
+            if is_mirror(id) {
+                return "unchanged (if the action should have changed the screen, iPhone Mirroring may have stopped passing input on: ask the person to quit it (⌘Q) and open it again)".into();
+            }
             return "unchanged".into();
         }
         self.last_screen.insert(id.to_string(), text.clone());
@@ -784,7 +787,7 @@ impl State {
         if crate::mirroring::enabled() {
             iphones.push(match crate::mirroring::problem() {
                 None => format!(
-                    "{} iPhone through iPhone Mirroring (OCR; takes the Mac's mouse while acting)",
+                    "{} iPhone through iPhone Mirroring (OCR; app launch takes a name; swipes move the Mac's pointer)",
                     crate::mirroring::DEVICE_ID
                 ),
                 Some(p) => format!("{} not usable: {p}", crate::mirroring::DEVICE_ID),
