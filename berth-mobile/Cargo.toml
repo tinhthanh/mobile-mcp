@@ -1,6 +1,6 @@
 [package]
 name = "berth-mobile"
-version = "0.4.4"
+version = "0.4.5"
 description = "Token-lean Android control over adb as an MCP server, packaged as Shipyard's \"mobile\" plugin"
 edition = "2024"
 rust-version = "1.89"

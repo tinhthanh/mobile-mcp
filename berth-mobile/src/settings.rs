@@ -15,8 +15,9 @@ pub struct Setting {
 pub const NET: &str = "net";
 pub const AUTO_UIA2: &str = "auto-uia2";
 pub const AUTO_WDA: &str = "auto-wda";
+pub const MIRRORING: &str = "ios-mirroring";
 
-pub const SETTINGS: [Setting; 3] = [
+pub const SETTINGS: [Setting; 4] = [
     Setting {
         key: AUTO_UIA2,
         label: "Tự cài UiAutomator2 lên điện thoại",
@@ -38,6 +39,15 @@ pub const SETTINGS: [Setting; 3] = [
         default: false,
         warning: Some(
             "Agent sẽ thấy địa chỉ, header và nội dung request của các app trên điện thoại (header bí mật được che), và có thể cài PCAPdroid. Chỉ bật trên máy test.",
+        ),
+    },
+    Setting {
+        key: MIRRORING,
+        label: "Dự phòng iPhone qua iPhone Mirroring",
+        description: "Agent điều khiển iPhone qua cửa sổ iPhone Mirroring trên Mac (đọc bằng OCR), cho iPhone không có trong provisioning profile hoặc không cắm cáp. Cần quyền Accessibility và Screen Recording.",
+        default: false,
+        warning: Some(
+            "Khi agent thao tác, nó điều khiển chuột và bàn phím thật của Mac (trả con trỏ về chỗ cũ sau mỗi thao tác): đừng dùng Mac cùng lúc. Agent thấy mọi thứ trên màn hình iPhone.",
         ),
     },
 ];

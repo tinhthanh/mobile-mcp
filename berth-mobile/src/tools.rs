@@ -69,6 +69,10 @@ fn ios_devices() -> Vec<String> {
     })
 }
 
+fn is_mirror(id: &str) -> bool {
+    id == crate::mirroring::DEVICE_ID
+}
+
 /// PNG width in pixels, from its header.
 fn png_width(png: &[u8]) -> Option<u32> {
     png.get(16..20)
@@ -268,6 +272,9 @@ impl State {
             let ios = ios_devices();
             self.ios_ids.extend(ios.iter().cloned());
             ids.extend(ios);
+            if crate::mirroring::enabled() && crate::mirroring::problem().is_none() {
+                ids.push(crate::mirroring::DEVICE_ID.to_string());
+            }
             self.devices = Some((Instant::now(), ids));
         }
         let ids = &self.devices.as_ref().expect("set above").1;
@@ -316,6 +323,9 @@ impl State {
     }
 
     fn screenshot(&mut self, id: &str) -> Result<Vec<u8>> {
+        if is_mirror(id) {
+            return crate::mirroring::screenshot().map(|(png, _)| png);
+        }
         match self.ios(id)? {
             Some(p) => p.screenshot(),
             None => self.device(id)?.screenshot(),
@@ -324,6 +334,13 @@ impl State {
 
     fn do_tap(&mut self, id: &str, x: i64, y: i64, mode: &str) -> Result<()> {
         self.fresh.remove(id);
+        if is_mirror(id) {
+            return match mode {
+                "double" => crate::mirroring::tap(x, y, 50, 2),
+                "long" => crate::mirroring::tap(x, y, 800, 1),
+                _ => crate::mirroring::tap(x, y, 60, 1),
+            };
+        }
         match self.ios(id)? {
             Some(p) => match mode {
                 "double" => p.double_tap(x, y),
@@ -349,6 +366,9 @@ impl State {
         distance: Option<i64>,
     ) -> Result<()> {
         self.fresh.remove(id);
+        if is_mirror(id) {
+            return crate::mirroring::swipe(d, from, distance);
+        }
         match (self.ios(id)?, from) {
             (Some(p), Some((x, y))) => p.swipe_from(x, y, d, distance),
             (Some(p), None) => p.swipe(d),
@@ -359,6 +379,9 @@ impl State {
 
     fn do_key(&mut self, id: &str, button: &str) -> Result<()> {
         self.fresh.remove(id);
+        if is_mirror(id) {
+            return crate::mirroring::press_button(button);
+        }
         match self.ios(id)? {
             Some(p) => p.press_button(button),
             None => self.device(id)?.press_button(button),
@@ -366,6 +389,11 @@ impl State {
     }
 
     fn list_apps(&mut self, id: &str) -> Result<Vec<String>> {
+        if is_mirror(id) {
+            actionable!(
+                "iPhone Mirroring can't list apps: launch one by its Home Screen name (app launch \"Cài đặt\"), then tap its Spotlight result"
+            );
+        }
         if self.is_ios(id)? {
             return crate::goios::apps(id, true);
         }
@@ -440,6 +468,15 @@ impl State {
     }
 
     fn capture_screen(&mut self, id: &str, force_ocr: bool) -> Result<String> {
+        if is_mirror(id) {
+            let _ = force_ocr; // always OCR: the mirror is a picture
+            let mut out = vec!["app=iPhone Mirroring (ocr)".to_string()];
+            out.extend(crate::mirroring::screen_lines()?);
+            let screen = out.join("\n");
+            self.fresh
+                .insert(id.to_string(), (Instant::now(), screen.clone()));
+            return Ok(screen);
+        }
         if self.is_ios(id)? {
             let screen = self.ios_screen(id, force_ocr)?;
             self.fresh
@@ -473,6 +510,9 @@ impl State {
     /// "unchanged" when the screen is what the agent saw last.
     fn report(&mut self, id: &str, text: String) -> String {
         if self.last_screen.get(id) == Some(&text) {
+            if is_mirror(id) {
+                return "unchanged (if the action should have changed the screen, iPhone Mirroring may have stopped passing input on: ask the person to quit it (⌘Q) and open it again)".into();
+            }
             return "unchanged".into();
         }
         self.last_screen.insert(id.to_string(), text.clone());
@@ -482,7 +522,7 @@ impl State {
     /// Waits for the ui to settle so the agent doesn't get a half-drawn transition.
     fn settled_screen(&mut self, id: &str) -> Result<String> {
         // an iPhone's tree takes ~2 s to read: settle once instead of polling
-        if self.is_ios(id)? || self.uia2(id)?.is_none() {
+        if is_mirror(id) || self.is_ios(id)? || self.uia2(id)?.is_none() {
             sleep_ms(SETTLE_MS);
             return self.capture_screen(id, false);
         }
@@ -562,6 +602,13 @@ impl State {
 
     fn type_text(&mut self, id: &str, text: &str, submit: bool) -> Result<()> {
         self.fresh.remove(id);
+        if is_mirror(id) {
+            crate::mirroring::type_text(text)?;
+            if submit {
+                crate::mirroring::press_button("ENTER")?;
+            }
+            return Ok(());
+        }
         if let Some(p) = self.ios(id)? {
             p.type_text(text)?;
             if submit {
@@ -586,6 +633,16 @@ impl State {
         let Some(pkg) = package.filter(|p| !p.is_empty()) else {
             actionable!("package is required for {action}")
         };
+        if is_mirror(id) {
+            // no bundle ids through the mirror: the app's name, through Spotlight
+            return if action == "launch" {
+                crate::mirroring::launch(pkg)
+            } else {
+                Err(Error::actionable(
+                    "iPhone Mirroring can't stop apps: swipe the app away in the app switcher",
+                ))
+            };
+        }
         adb::validate_package(pkg)?;
         if let Some(p) = self.ios(id)? {
             return if action == "launch" {
@@ -672,7 +729,7 @@ impl State {
                 "Network capture is off for this computer. The person can turn on \"net\" for the mobile plugin in Shipyard → Settings → Plugins"
             );
         }
-        if self.is_ios(id)? {
+        if is_mirror(id) || self.is_ios(id)? {
             actionable!("net works on Android phones only");
         }
         self.device(id)?;
@@ -726,6 +783,15 @@ impl State {
                 Ok(_) => "unlock it and tap Trust on the iPhone, or replug the cable".to_string(),
             };
             iphones.push(format!("iPhone on USB, not usable: {why}"));
+        }
+        if crate::mirroring::enabled() {
+            iphones.push(match crate::mirroring::problem() {
+                None => format!(
+                    "{} iPhone through iPhone Mirroring (OCR; app launch takes a name; swipes move the Mac's pointer)",
+                    crate::mirroring::DEVICE_ID
+                ),
+                Some(p) => format!("{} not usable: {p}", crate::mirroring::DEVICE_ID),
+            });
         }
         if listed.is_empty() && iphones.is_empty() {
             return Ok(
